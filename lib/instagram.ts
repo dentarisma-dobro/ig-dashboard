@@ -52,19 +52,36 @@ export function listAccounts(): Account[] {
   return getAccounts();
 }
 
-// Дневные метрики по аккаунту за сегодня
+// Дневные метрики по аккаунту за сегодня.
+// follower_count в Graph API требует отдельного запроса без metric_type
+// (это не совместимо с total_value, в отличие от reach и profile_views).
 export async function fetchAccountDailyInsights(account: Account) {
-  const data = await graphGet(`/${account.id}/insights`, {
-    metric: METRICS_ACCOUNT.join(","),
-    period: "day",
-    metric_type: "total_value",
-  });
   const result: Record<string, number> = {};
-  for (const item of data.data || []) {
-    const value =
-      item.total_value?.value ?? item.values?.[item.values.length - 1]?.value ?? 0;
-    result[item.name] = value;
+
+  try {
+    const totalValueMetrics = await graphGet(`/${account.id}/insights`, {
+      metric: "reach,profile_views",
+      period: "day",
+      metric_type: "total_value",
+    });
+    for (const item of totalValueMetrics.data || []) {
+      result[item.name] = item.total_value?.value ?? 0;
+    }
+  } catch (e) {
+    // не роняем весь сбор, если поменяется состав этих метрик
   }
+
+  try {
+    const followerData = await graphGet(`/${account.id}/insights`, {
+      metric: "follower_count",
+      period: "day",
+    });
+    const item = followerData.data?.[0];
+    result.follower_count = item?.values?.[item.values.length - 1]?.value ?? 0;
+  } catch (e) {
+    // follower_count иногда недоступен в первые дни после подключения аккаунта
+  }
+
   return result;
 }
 
