@@ -14,5 +14,11 @@ export function getSupabase() {
   }
   return createClient(supabaseUrl, supabaseServiceKey, {
     auth: { persistSession: false },
+    global: {
+      // Next.js по умолчанию кеширует fetch-запросы даже внутри
+      // динамических роутов — явно запрещаем кеш, иначе дашборд будет
+      // показывать устаревшие данные вместо свежих из базы.
+      fetch: (url, options) => fetch(url, { ...options, cache: "no-store" }),
+    },
   });
 }
