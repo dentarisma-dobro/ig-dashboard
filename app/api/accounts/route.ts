@@ -12,7 +12,6 @@ export async function GET() {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Подтягиваем последний доступный срез метрик по каждому аккаунту
   const withLatest = await Promise.all(
     (accounts || []).map(async (acc) => {
       const { data: latest } = await supabase

@@ -2,14 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { listAccounts, fetchAllMediaPage, fetchMediaInsights } from "@/lib/instagram";
 
-// Разовый эндпоинт: подгружает ВСЮ историю постов (лайки/комментарии) —
-// то, что Instagram действительно хранит и отдаёт за прошлые периоды.
-// Графики охвата/показов/подписчиков за прошлые месяцы восстановить нельзя
-// (см. объяснение в чате) — это ограничение самого Instagram API.
-//
-// Запускать вручную один раз после первого деплоя: открыть в браузере
-// https://ваш-сайт.vercel.app/api/cron/backfill?secret=ВАШ_CRON_SECRET
-// Может занять несколько минут при большом архиве постов — это нормально.
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
   if (secret !== process.env.CRON_SECRET) {
@@ -54,7 +46,6 @@ export async function GET(req: NextRequest) {
       }
       after = nextCursor || undefined;
       pageCount++;
-      // Защита от бесконечного цикла на случай странного ответа API
     } while (after && pageCount < 40);
 
     log.push(`${account.username}: загружено постов — ${total}`);

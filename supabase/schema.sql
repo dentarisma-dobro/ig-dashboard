@@ -1,15 +1,17 @@
--- Схема базы данных для дашборда статистики Instagram
--- Выполните этот файл целиком в Supabase: SQL Editor -> New query -> вставить -> Run
+-- Исходная схема (уже выполнена вами ранее — этот файл не нужно
+-- запускать повторно, если сайт уже работает). Оставлен для справки
+-- и на случай развёртывания на новом Supabase-проекте с нуля.
+-- Для добавления новых функций (реклама, конкуренты, коммуникация)
+-- используйте migration_2.sql.
 
 create table if not exists accounts (
-  id text primary key,              -- Instagram Business Account ID
-  username text not null,           -- @username
-  display_name text not null,       -- "Dentarisma", "Dentarisma Dobro", "Alex Kozlov"
-  page_id text not null,            -- ID связанной Facebook-страницы
+  id text primary key,
+  username text not null,
+  display_name text not null,
+  page_id text not null,
   created_at timestamptz default now()
 );
 
--- Ежедневные срезы по аккаунту (охват, показы, подписчики)
 create table if not exists daily_account_stats (
   id bigint generated always as identity primary key,
   account_id text references accounts(id) not null,
@@ -22,11 +24,10 @@ create table if not exists daily_account_stats (
   unique (account_id, date)
 );
 
--- Посты и их метрики (обновляются при каждом сборе, поэтому не unique по дню)
 create table if not exists posts (
-  id text primary key,              -- Instagram media ID
+  id text primary key,
   account_id text references accounts(id) not null,
-  media_type text,                  -- IMAGE, VIDEO, CAROUSEL_ALBUM
+  media_type text,
   caption text,
   permalink text,
   thumbnail_url text,
@@ -39,9 +40,8 @@ create table if not exists posts (
   updated_at timestamptz default now()
 );
 
--- Stories (короткоживущие, поэтому сохраняем снимок метрик на момент сбора)
 create table if not exists stories (
-  id text primary key,              -- Instagram media ID
+  id text primary key,
   account_id text references accounts(id) not null,
   posted_at timestamptz,
   reach bigint default 0,

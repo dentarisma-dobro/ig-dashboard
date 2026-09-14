@@ -1,8 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-// Формирует PDF-отчёт прямо в браузере (без обращения к серверу) —
-// сводка по аккаунтам + топ постов за выбранный период.
 export function exportMonthlyPdf({
   accounts,
   stats,

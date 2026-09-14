@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Простая защита паролем на весь сайт, кроме страницы логина,
-// самого API логина и cron-эндпоинта (у него своя защита секретом в URL).
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 

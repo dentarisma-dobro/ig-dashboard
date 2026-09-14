@@ -1,8 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 
-// Используем service_role ключ (не anon), потому что весь доступ к сайту
-// уже защищён паролем в middleware.ts — Supabase Row Level Security нам
-// не нужен для этого личного инструмента.
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
@@ -15,9 +12,8 @@ export function getSupabase() {
   return createClient(supabaseUrl, supabaseServiceKey, {
     auth: { persistSession: false },
     global: {
-      // Next.js по умолчанию кеширует fetch-запросы даже внутри
-      // динамических роутов — явно запрещаем кеш, иначе дашборд будет
-      // показывать устаревшие данные вместо свежих из базы.
+      // Next.js кеширует fetch-запросы даже внутри динамических роутов —
+      // явно запрещаем кеш, иначе дашборд будет показывать устаревшие данные.
       fetch: (url, options) => fetch(url, { ...options, cache: "no-store" }),
     },
   });

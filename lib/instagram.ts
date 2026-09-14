@@ -4,21 +4,17 @@
 // Если какой-то запрос начнёт возвращать ошибку вида
 // "(#100) metric[0] must be one of the following values: ..." —
 // это значит Meta переименовала метрику. Сообщение об ошибке само
-// подскажет актуальный список названий, нужно будет поправить
-// константы METRICS_ACCOUNT / METRICS_POST / METRICS_STORY ниже.
+// подскажет актуальный список названий.
 
 const GRAPH_VERSION = "v21.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 
 export type Account = {
-  id: string; // Instagram Business Account ID
+  id: string;
   username: string;
   display_name: string;
   page_id: string;
 };
-
-const METRICS_ACCOUNT = ["reach", "profile_views", "follower_count"];
-const METRICS_STORY = ["reach", "replies", "exits"];
 
 function getAccounts(): Account[] {
   const raw = process.env.IG_ACCOUNTS;
@@ -52,9 +48,10 @@ export function listAccounts(): Account[] {
   return getAccounts();
 }
 
-// Дневные метрики по аккаунту за сегодня.
-// follower_count в Graph API требует отдельного запроса без metric_type
-// (это не совместимо с total_value, в отличие от reach и profile_views).
+// Дневные метрики по аккаунту: охват/визиты (total_value), подписчики
+// (отдельный формат) и клики по кнопкам связи (тоже total_value, но
+// отдельным запросом, т.к. доступны не всем аккаунтам — не должны
+// ронять остальные метрики, если недоступны).
 export async function fetchAccountDailyInsights(account: Account) {
   const result: Record<string, number> = {};
 
@@ -82,10 +79,23 @@ export async function fetchAccountDailyInsights(account: Account) {
     // follower_count иногда недоступен в первые дни после подключения аккаунта
   }
 
+  try {
+    const ctaMetrics = await graphGet(`/${account.id}/insights`, {
+      metric:
+        "website_clicks,phone_call_clicks,text_message_clicks,email_contacts,get_directions_clicks",
+      period: "day",
+      metric_type: "total_value",
+    });
+    for (const item of ctaMetrics.data || []) {
+      result[item.name] = item.total_value?.value ?? 0;
+    }
+  } catch (e) {
+    // доступно только если в профиле настроены кнопки связи — не критично
+  }
+
   return result;
 }
 
-// Последние N постов аккаунта с базовыми полями
 export async function fetchRecentMedia(account: Account, limit = 25) {
   const data = await graphGet(`/${account.id}/media`, {
     fields:
@@ -95,9 +105,6 @@ export async function fetchRecentMedia(account: Account, limit = 25) {
   return data.data || [];
 }
 
-// Постраничная выгрузка ВСЕХ постов аккаунта — для разовой подгрузки истории.
-// Используется только эндпоинтом backfill, не ежедневным сбором (иначе слишком
-// медленно и не нужно каждый день перечитывать весь архив).
 export async function fetchAllMediaPage(account: Account, after?: string) {
   const params: Record<string, string> = {
     fields:
@@ -109,15 +116,13 @@ export async function fetchAllMediaPage(account: Account, after?: string) {
   const data = await graphGet(`/${account.id}/media`, params);
   return {
     items: data.data || [],
-    nextCursor: data.paging?.cursors?.after && data.paging?.next ? data.paging.cursors.after : null,
+    nextCursor:
+      data.paging?.cursors?.after && data.paging?.next ? data.paging.cursors.after : null,
   };
 }
 
-// Инсайты одного поста (охват, сохранения, шеринги)
 export async function fetchMediaInsights(mediaId: string, mediaType: string) {
-  // Reels используют другой набор метрик, чем обычные фото/карусели
-  const isReel = mediaType === "VIDEO" || mediaType === "REELS";
-  const metrics = isReel ? ["reach", "saved", "shares"] : ["reach", "saved", "shares"];
+  const metrics = ["reach", "saved", "shares"];
   try {
     const data = await graphGet(`/${mediaId}/insights`, {
       metric: metrics.join(","),
@@ -128,12 +133,10 @@ export async function fetchMediaInsights(mediaId: string, mediaType: string) {
     }
     return result;
   } catch (e) {
-    // Некоторые старые посты могут не отдавать инсайты — не роняем весь сбор
     return {};
   }
 }
 
-// Активные (ещё не исчезнувшие) Stories аккаунта
 export async function fetchActiveStories(account: Account) {
   const data = await graphGet(`/${account.id}/stories`, {
     fields: "id,timestamp,media_type",
@@ -144,7 +147,7 @@ export async function fetchActiveStories(account: Account) {
 export async function fetchStoryInsights(storyId: string) {
   try {
     const data = await graphGet(`/${storyId}/insights`, {
-      metric: METRICS_STORY.join(","),
+      metric: "reach,replies,exits",
     });
     const result: Record<string, number> = {};
     for (const item of data.data || []) {

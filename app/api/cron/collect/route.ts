@@ -9,9 +9,6 @@ import {
   fetchStoryInsights,
 } from "@/lib/instagram";
 
-// Этот эндпоинт вызывается автоматически Vercel Cron раз в день (см. vercel.json).
-// Можно также вызвать его вручную, открыв URL в браузере с правильным секретом —
-// удобно для проверки, что всё работает, не дожидаясь расписания.
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
   if (secret !== process.env.CRON_SECRET) {
@@ -25,7 +22,6 @@ export async function GET(req: NextRequest) {
 
   for (const account of accounts) {
     try {
-      // 1. Убедимся, что аккаунт есть в таблице accounts
       await supabase.from("accounts").upsert({
         id: account.id,
         username: account.username,
@@ -33,7 +29,6 @@ export async function GET(req: NextRequest) {
         page_id: account.page_id,
       });
 
-      // 2. Дневные метрики по аккаунту
       const insights = await fetchAccountDailyInsights(account);
       await supabase.from("daily_account_stats").upsert(
         {
@@ -43,12 +38,16 @@ export async function GET(req: NextRequest) {
           impressions: insights.impressions || 0,
           follower_count: insights.follower_count || 0,
           profile_views: insights.profile_views || 0,
+          website_clicks: insights.website_clicks || 0,
+          phone_call_clicks: insights.phone_call_clicks || 0,
+          text_message_clicks: insights.text_message_clicks || 0,
+          email_contacts: insights.email_contacts || 0,
+          get_directions_clicks: insights.get_directions_clicks || 0,
         },
         { onConflict: "account_id,date" }
       );
       log.push(`${account.username}: дневные метрики сохранены`);
 
-      // 3. Посты и их метрики
       const media = await fetchRecentMedia(account, 25);
       for (const m of media) {
         const mi = await fetchMediaInsights(m.id, m.media_type);
@@ -69,7 +68,6 @@ export async function GET(req: NextRequest) {
       }
       log.push(`${account.username}: постов обновлено ${media.length}`);
 
-      // 4. Активные Stories (успеть собрать метрики до истечения 24 часов)
       const stories = await fetchActiveStories(account);
       for (const s of stories) {
         const si = await fetchStoryInsights(s.id);

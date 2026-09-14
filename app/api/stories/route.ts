@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 
-// GET /api/stories?account=ID&days=30
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   const accountId = req.nextUrl.searchParams.get("account");
   const days = Number(req.nextUrl.searchParams.get("days") || "30");
