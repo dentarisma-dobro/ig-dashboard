@@ -96,10 +96,16 @@ export async function fetchAccountDailyInsights(account: Account) {
   return result;
 }
 
+// reposts_count — отдельное поле, которое Meta добавила в 2026 году
+// (репост через функцию "Репост", отдельно от пересылок/shares).
+// Если начнёт возвращать ошибку про неизвестное поле — значит название
+// изменилось, уберите "reposts_count" из полей ниже, пока не найдёте новое.
+const MEDIA_FIELDS =
+  "id,caption,media_type,media_product_type,permalink,thumbnail_url,media_url,timestamp,like_count,comments_count,reposts_count";
+
 export async function fetchRecentMedia(account: Account, limit = 25) {
   const data = await graphGet(`/${account.id}/media`, {
-    fields:
-      "id,caption,media_type,media_product_type,permalink,thumbnail_url,media_url,timestamp,like_count,comments_count",
+    fields: MEDIA_FIELDS,
     limit: String(limit),
   });
   return data.data || [];
@@ -107,8 +113,7 @@ export async function fetchRecentMedia(account: Account, limit = 25) {
 
 export async function fetchAllMediaPage(account: Account, after?: string) {
   const params: Record<string, string> = {
-    fields:
-      "id,caption,media_type,media_product_type,permalink,thumbnail_url,media_url,timestamp,like_count,comments_count",
+    fields: MEDIA_FIELDS,
     limit: "50",
   };
   if (after) params.after = after;

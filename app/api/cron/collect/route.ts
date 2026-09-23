@@ -63,6 +63,7 @@ export async function GET(req: NextRequest) {
           comments: m.comments_count || 0,
           saved: mi.saved || 0,
           shares: mi.shares || 0,
+          reposts: m.reposts_count || 0,
           reach: mi.reach || 0,
         });
       }

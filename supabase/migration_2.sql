@@ -40,5 +40,8 @@ create table if not exists competitor_snapshots (
   created_at timestamptz default now()
 );
 
+-- Reposts — отдельная метрика от Shares (пересылок), Meta развела их в 2026 году
+alter table posts add column if not exists reposts bigint default 0;
+
 create index if not exists idx_ads_account on ad_campaigns(account_id, start_date);
 create index if not exists idx_competitor_snapshots on competitor_snapshots(competitor_id, date desc);

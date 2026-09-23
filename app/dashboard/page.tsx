@@ -53,6 +53,7 @@ type Post = {
   comments: number;
   saved: number;
   shares: number;
+  reposts: number;
   reach: number;
   accounts: { username: string; display_name: string };
 };
@@ -94,9 +95,23 @@ const COMM_LABELS: Record<string, string> = {
 
 const PALETTE = ["#2F6FED", "#3FB68B", "#F2994A", "#D65DB1", "#00C2CB"];
 
-function engagementOf(p: { likes?: number; comments?: number; saved?: number; shares?: number }) {
-  return (p.likes || 0) + (p.comments || 0) + (p.saved || 0) + (p.shares || 0);
+function engagementOf(p: {
+  likes?: number;
+  comments?: number;
+  saved?: number;
+  shares?: number;
+  reposts?: number;
+}) {
+  return (p.likes || 0) + (p.comments || 0) + (p.saved || 0) + (p.shares || 0) + (p.reposts || 0);
 }
+
+const ACTIVITY_SERIES: { key: "likes" | "comments" | "saved" | "shares" | "reposts"; label: string }[] = [
+  { key: "likes", label: "Лайки" },
+  { key: "comments", label: "Комментарии" },
+  { key: "saved", label: "Сохранения" },
+  { key: "shares", label: "Пересылки" },
+  { key: "reposts", label: "Репосты" },
+];
 
 export default function Dashboard() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -112,9 +127,9 @@ export default function Dashboard() {
   const [bestTime, setBestTime] = useState<{ slots: any[]; reliable: boolean; totalPostsAnalyzed: number } | null>(
     null
   );
-  const [postSort, setPostSort] = useState<"likes" | "comments" | "saved" | "reach" | "shares">(
-    "reach"
-  );
+  const [postSort, setPostSort] = useState<
+    "likes" | "comments" | "saved" | "reach" | "shares" | "reposts"
+  >("reach");
   const [postSortDir, setPostSortDir] = useState<"desc" | "asc">("desc");
   const [showAdForm, setShowAdForm] = useState(false);
   const [adForm, setAdForm] = useState({
@@ -194,15 +209,16 @@ export default function Dashboard() {
   }, [stats, selected]);
 
   const activityChartData = useMemo(() => {
-    const byDate: Record<string, number> = {};
+    const byDate: Record<string, any> = {};
     for (const p of posts) {
       const day = p.posted_at?.slice(0, 10);
       if (!day) continue;
-      byDate[day] = (byDate[day] || 0) + engagementOf(p);
+      if (!byDate[day]) byDate[day] = { date: day };
+      for (const s of ACTIVITY_SERIES) {
+        byDate[day][s.label] = (byDate[day][s.label] || 0) + ((p as any)[s.key] || 0);
+      }
     }
-    return Object.entries(byDate)
-      .map(([date, activity]) => ({ date, activity }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+    return Object.values(byDate).sort((a: any, b: any) => a.date.localeCompare(b.date));
   }, [posts]);
 
   const accountNames = useMemo(
@@ -424,14 +440,28 @@ export default function Dashboard() {
 
       {/* Активность по дням */}
       <div className="border border-line rounded-lg p-4 md:p-6 bg-panel mb-6">
-        <h2 className="font-display text-xl mb-4">Активность (лайки + комментарии + сохранения + репосты)</h2>
-        <ResponsiveContainer width="100%" height={240}>
+        <h2 className="font-display text-xl mb-1">Активность</h2>
+        <p className="text-muted text-xs mb-4">
+          Каждый показатель отдельно — Пересылки (через "самолётик" в директ/сторис) и
+          Репосты (через функцию "Репост") у Instagram теперь разные метрики
+        </p>
+        <ResponsiveContainer width="100%" height={280}>
           <LineChart data={activityChartData}>
             <CartesianGrid stroke="#2B3742" strokeDasharray="3 3" />
             <XAxis dataKey="date" stroke="#8B98A5" fontSize={12} />
             <YAxis stroke="#8B98A5" fontSize={12} />
             <Tooltip contentStyle={{ background: "#1B2530", border: "1px solid #2B3742" }} />
-            <Line type="monotone" dataKey="activity" stroke="#3FB68B" strokeWidth={2} dot={false} />
+            <Legend />
+            {ACTIVITY_SERIES.map((s, i) => (
+              <Line
+                key={s.key}
+                type="monotone"
+                dataKey={s.label}
+                stroke={PALETTE[i % PALETTE.length]}
+                strokeWidth={2}
+                dot={false}
+              />
+            ))}
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -558,7 +588,7 @@ export default function Dashboard() {
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <h2 className="font-display text-xl">Топ постов</h2>
           <div className="flex items-center gap-2 text-sm">
-            {(["reach", "likes", "comments", "saved", "shares"] as const).map((s) => (
+            {(["reach", "likes", "comments", "saved", "shares", "reposts"] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setPostSort(s)}
@@ -574,6 +604,8 @@ export default function Dashboard() {
                   ? "Комм."
                   : s === "saved"
                   ? "Сохр."
+                  : s === "shares"
+                  ? "Пересылки"
                   : "Репосты"}
               </button>
             ))}
@@ -614,6 +646,9 @@ export default function Dashboard() {
                 <p className="text-muted">{new Date(p.posted_at).toLocaleDateString("ru-RU")}</p>
                 <p className="mt-1">
                   ❤ {p.likes?.toLocaleString("ru-RU")} · 💬 {p.comments?.toLocaleString("ru-RU")}
+                </p>
+                <p className="text-muted">
+                  ➤ {p.shares?.toLocaleString("ru-RU") ?? 0} · ↻ {p.reposts?.toLocaleString("ru-RU") ?? 0}
                 </p>
                 <p className="text-muted">Охват {p.reach?.toLocaleString("ru-RU")}</p>
               </div>

@@ -13,7 +13,9 @@ export async function GET(req: NextRequest) {
   const accountId = req.nextUrl.searchParams.get("account");
   const supabase = getSupabase();
 
-  let query = supabase.from("posts").select("posted_at, likes, comments, saved, shares");
+  let query = supabase
+    .from("posts")
+    .select("posted_at, likes, comments, saved, shares, reposts");
   if (accountId) query = query.eq("account_id", accountId);
 
   const { data: posts, error } = await query;
@@ -26,7 +28,8 @@ export async function GET(req: NextRequest) {
     const day = DAYS[d.getDay()];
     const hour = d.getHours();
     const key = `${day}-${hour}`;
-    const engagement = (p.likes || 0) + (p.comments || 0) + (p.saved || 0) + (p.shares || 0);
+    const engagement =
+      (p.likes || 0) + (p.comments || 0) + (p.saved || 0) + (p.shares || 0) + (p.reposts || 0);
     if (!buckets[key]) buckets[key] = { total: 0, count: 0 };
     buckets[key].total += engagement;
     buckets[key].count += 1;
