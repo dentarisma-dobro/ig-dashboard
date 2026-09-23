@@ -68,15 +68,13 @@ export async function fetchAccountDailyInsights(account: Account) {
     // не роняем весь сбор, если поменяется состав этих метрик
   }
 
-  try {
-    const followerData = await graphGet(`/${account.id}/insights`, {
-      metric: "follower_count",
-      period: "day",
+    try {
+    const accountData = await graphGet(`/${account.id}`, {
+      fields: "followers_count",
     });
-    const item = followerData.data?.[0];
-    result.follower_count = item?.values?.[item.values.length - 1]?.value ?? 0;
+    result.follower_count = accountData.followers_count ?? 0;
   } catch (e) {
-    // follower_count иногда недоступен в первые дни после подключения аккаунта
+    // followers_count иногда недоступен сразу после подключения аккаунта
   }
 
   try {
