@@ -1,35 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase } from "@/lib/supabase";
+import { getSupabase, selectAll } from "@/lib/supabase";
+import { fail, parseAccount, parseRange } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/stats?days=30  ИЛИ  /api/stats?from=2026-08-01&to=2026-09-01
+// GET /api/stats?account=ID|all&from=YYYY-MM-DD&to=YYYY-MM-DD
+// -> дневная статистика за период и за такой же предыдущий период (для сравнения)
 export async function GET(req: NextRequest) {
-  const from = req.nextUrl.searchParams.get("from");
-  const to = req.nextUrl.searchParams.get("to");
-  const days = Number(req.nextUrl.searchParams.get("days") || "30");
-  const supabase = getSupabase();
-
-  let sinceStr: string;
-  let untilStr: string;
-
-  if (from && to) {
-    sinceStr = from;
-    untilStr = to;
-  } else {
-    const since = new Date();
-    since.setDate(since.getDate() - days);
-    sinceStr = since.toISOString().slice(0, 10);
-    untilStr = new Date().toISOString().slice(0, 10);
+  try {
+    const range = parseRange(req);
+    const account = parseAccount(req);
+    const sb = getSupabase();
+    const rows = await selectAll((from, to) => {
+      let q = sb
+        .from("account_daily")
+        .select("*")
+        .gte("date", range.prevFrom)
+        .lte("date", range.to)
+        .order("date")
+        .range(from, to);
+      if (account) q = q.eq("account_id", account);
+      return q;
+    });
+    return NextResponse.json({ ...range, rows });
+  } catch (e) {
+    return fail(e);
   }
-
-  const { data, error } = await supabase
-    .from("daily_account_stats")
-    .select("*, accounts(username, display_name)")
-    .gte("date", sinceStr)
-    .lte("date", untilStr)
-    .order("date");
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ stats: data });
 }

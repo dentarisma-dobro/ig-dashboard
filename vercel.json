@@ -1,8 +1,8 @@
 {
   "crons": [
-    {
-      "path": "/api/cron/collect?secret=dhKU4dBZHo6Lwx8Q",
-      "schedule": "0 6 * * *"
-    }
+    { "path": "/api/cron/collect", "schedule": "0 9 * * *" },
+    { "path": "/api/cron/stories", "schedule": "0 3 * * *" },
+    { "path": "/api/cron/stories", "schedule": "0 15 * * *" },
+    { "path": "/api/cron/stories", "schedule": "0 21 * * *" }
   ]
 }

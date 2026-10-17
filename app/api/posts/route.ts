@@ -1,27 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase } from "@/lib/supabase";
+import { getSupabase, selectAll } from "@/lib/supabase";
+import { fail, parseAccount, parseRange, POST_COLUMNS } from "@/lib/api";
+import { addDays, LOCAL_TZ, midnightUtc } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/posts?account=ID&limit=60&from=2026-08-01&to=2026-09-14
+// GET /api/posts?account=ID|all&from&to
+// -> публикации, вышедшие за период и за предыдущий такой же период (по московскому времени)
 export async function GET(req: NextRequest) {
-  const accountId = req.nextUrl.searchParams.get("account");
-  const limit = Number(req.nextUrl.searchParams.get("limit") || "60");
-  const from = req.nextUrl.searchParams.get("from");
-  const to = req.nextUrl.searchParams.get("to");
-  const supabase = getSupabase();
-
-  let query = supabase
-    .from("posts")
-    .select("*, accounts(username, display_name)")
-    .order("posted_at", { ascending: false })
-    .limit(limit);
-
-  if (accountId) query = query.eq("account_id", accountId);
-  if (from) query = query.gte("posted_at", from);
-  if (to) query = query.lte("posted_at", `${to}T23:59:59`);
-
-  const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ posts: data });
+  try {
+    const range = parseRange(req);
+    const account = parseAccount(req);
+    const since = new Date(midnightUtc(range.prevFrom, LOCAL_TZ)).toISOString();
+    const until = new Date(midnightUtc(addDays(range.to, 1), LOCAL_TZ)).toISOString();
+    const sb = getSupabase();
+    const posts = await selectAll((from, to) => {
+      let q = sb
+        .from("posts")
+        .select(POST_COLUMNS)
+        .gte("posted_at", since)
+        .lt("posted_at", until)
+        .order("posted_at", { ascending: false })
+        .range(from, to);
+      if (account) q = q.eq("account_id", account);
+      return q;
+    });
+    return NextResponse.json({ ...range, posts });
+  } catch (e) {
+    return fail(e);
+  }
 }

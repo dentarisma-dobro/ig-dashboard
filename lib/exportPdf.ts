@@ -1,64 +1,73 @@
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+// Скачивание PDF-отчёта. Всё происходит в браузере: данные берутся из API сайта,
+// документ собирается через @react-pdf/renderer (библиотека грузится только по нажатию кнопки).
 
-export function exportMonthlyPdf({
-  accounts,
-  stats,
-  posts,
-  selected,
-  days,
-}: {
-  accounts: any[];
-  stats: any[];
-  posts: any[];
-  selected: string;
-  days: number;
-}) {
-  const doc = new jsPDF();
-  const today = new Date().toLocaleDateString("ru-RU");
+import { createElement } from "react";
+import type { ReportData } from "./report/data";
 
-  doc.setFontSize(16);
-  doc.text("Отчёт по статистике Instagram", 14, 18);
-  doc.setFontSize(10);
-  doc.text(`Сформировано: ${today} · период: ${days} дней`, 14, 25);
-
-  const relevantAccounts =
-    selected === "all" ? accounts : accounts.filter((a) => a.id === selected);
-
-  autoTable(doc, {
-    startY: 32,
-    head: [["Аккаунт", "Подписчики", "Охват", "Показы", "Визиты в профиль"]],
-    body: relevantAccounts.map((a) => [
-      a.display_name,
-      a.latest?.follower_count ?? "—",
-      a.latest?.reach ?? "—",
-      a.latest?.impressions ?? "—",
-      a.latest?.profile_views ?? "—",
-    ]),
+// Картинка -> JPEG data URL нужного размера (обрезка по центру).
+// Через canvas, потому что PDF понимает только JPEG и PNG, а заодно файл получается легче.
+function toJpeg(url: string, size: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    const timer = setTimeout(() => resolve(null), 15000);
+    img.onload = () => {
+      clearTimeout(timer);
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d")!;
+        const side = Math.min(img.naturalWidth, img.naturalHeight);
+        ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => {
+      clearTimeout(timer);
+      resolve(null);
+    };
+    img.src = url;
   });
+}
 
-  const relevantPosts =
-    selected === "all" ? posts : posts.filter((p) => p.account_id === selected);
-  const topPosts = [...relevantPosts]
-    .sort((a, b) => (b.reach || 0) - (a.reach || 0))
-    .slice(0, 15);
+async function collectImages(data: ReportData): Promise<Record<string, string | null>> {
+  const jobs: [string, string, number][] = [];
+  for (const r of data.accounts) {
+    if (r.account.avatar_url) jobs.push([`avatar:${r.account.id}`, r.account.avatar_url, 132]);
+    const top = [...r.posts].sort((a, b) => (b.reach || 0) - (a.reach || 0)).slice(0, 10);
+    for (const p of top) if (p.thumb_url) jobs.push([p.id, p.thumb_url, 96]);
+  }
+  const out: Record<string, string | null> = {};
+  await Promise.all(jobs.map(async ([key, url, size]) => (out[key] = await toJpeg(url, size))));
+  return out;
+}
 
-  const finalY = (doc as any).lastAutoTable.finalY || 60;
-  doc.setFontSize(12);
-  doc.text("Топ-15 постов по охвату", 14, finalY + 12);
+export function reportFileName(data: ReportData, ext: string) {
+  const who = data.accounts.length === 1 ? data.accounts[0].account.username : "accounts";
+  return `instagram-${who}-${data.from}_${data.to}.${ext}`;
+}
 
-  autoTable(doc, {
-    startY: finalY + 16,
-    head: [["Дата", "Аккаунт", "Охват", "Лайки", "Комментарии", "Сохранения"]],
-    body: topPosts.map((p) => [
-      new Date(p.posted_at).toLocaleDateString("ru-RU"),
-      p.accounts?.display_name || "",
-      p.reach ?? 0,
-      p.likes ?? 0,
-      p.comments ?? 0,
-      p.saved ?? 0,
-    ]),
-  });
+export function saveBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
 
-  doc.save(`instagram-otchet-${today.replace(/\./g, "-")}.pdf`);
+export async function downloadPdfReport(data: ReportData) {
+  const [{ pdf }, { ReportDocument, registerFonts }, images] = await Promise.all([
+    import("@react-pdf/renderer"),
+    import("./report/pdf"),
+    collectImages(data),
+  ]);
+  registerFonts(window.location.origin);
+  const blob = await pdf(createElement(ReportDocument, { data, images }) as any).toBlob();
+  saveBlob(blob, reportFileName(data, "pdf"));
 }

@@ -2,7 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: light;
+  /* Цвета графиков (проверены на различимость при дальтонизме, см. README) */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --negative: #e34948;
+  --grid: #eceef1;
+  --axis: #8a929e;
+}
+
+html,
 body {
-  background-color: #151c22;
-  color: #edefef;
+  background-color: #f4f6f8;
+  color: #14171c;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Recharts: убираем рамку фокуса вокруг SVG */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #d5d9df;
+  border-radius: 3px;
 }
