@@ -40,14 +40,18 @@ async function collectImages(data: ReportData): Promise<Record<string, string | 
     const top = [...r.posts].sort((a, b) => (b.reach || 0) - (a.reach || 0)).slice(0, 10);
     for (const p of top) if (p.thumb_url) jobs.push([p.id, p.thumb_url, 96]);
   }
+  for (const r of data.tg) if (r.channel.avatar_url) jobs.push([`tg:${r.channel.id}`, r.channel.avatar_url, 132]);
   const out: Record<string, string | null> = {};
   await Promise.all(jobs.map(async ([key, url, size]) => (out[key] = await toJpeg(url, size))));
   return out;
 }
 
 export function reportFileName(data: ReportData, ext: string) {
-  const who = data.accounts.length === 1 ? data.accounts[0].account.username : "accounts";
-  return `instagram-${who}-${data.from}_${data.to}.${ext}`;
+  const total = data.accounts.length + data.tg.length;
+  let who = "report";
+  if (total === 1 && data.accounts.length === 1) who = `instagram-${data.accounts[0].account.username}`;
+  if (total === 1 && data.tg.length === 1) who = `telegram-${data.tg[0].channel.username || data.tg[0].channel.id}`;
+  return `${who}-${data.from}_${data.to}.${ext}`;
 }
 
 export function saveBlob(blob: Blob, name: string) {

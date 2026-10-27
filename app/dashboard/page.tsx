@@ -2,8 +2,9 @@
 
 import { Suspense, useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import type { Account, SyncRun } from "@/lib/types";
-import { resolvePeriod, type PresetId } from "@/lib/period";
+import type { Account, SyncRun, TgChannel, TgSession } from "@/lib/types";
+import { resolvePeriod } from "@/lib/period";
+import { dateInTz, lastCompleteMetaDay, LOCAL_TZ } from "@/lib/dates";
 import { useApi } from "@/components/useApi";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { PeriodPicker } from "@/components/PeriodPicker";
@@ -16,18 +17,25 @@ import { StoriesView } from "@/components/views/StoriesView";
 import { AudienceView } from "@/components/views/AudienceView";
 import { CompareView } from "@/components/views/CompareView";
 import { SettingsView } from "@/components/views/SettingsView";
+import { TgOverviewView } from "@/components/views/TgOverviewView";
+import { TgPostsView } from "@/components/views/TgPostsView";
+import { TgCompareView } from "@/components/views/TgCompareView";
 import { ReportDialog } from "@/components/ReportDialog";
 import { PostModal } from "@/components/PostModal";
 
 export type Ctx = {
   accounts: Account[];
-  account: Account | null; // null = все аккаунты
+  account: Account | null; // null = все аккаунты Instagram
   accountId: string;
+  tgChannels: TgChannel[];
+  tgChannel: TgChannel | null; // выбранный Telegram-канал
   from: string;
   to: string;
   colorFor: (id: string) => string;
+  tgColorFor: (id: string) => string;
   openPost: (id: string) => void;
   reloadAccounts: () => void;
+  reloadTg: () => void;
 };
 
 const TITLES: Record<View, string> = {
@@ -35,7 +43,7 @@ const TITLES: Record<View, string> = {
   posts: "Публикации",
   stories: "Stories",
   audience: "Аудитория",
-  compare: "Сравнение аккаунтов",
+  compare: "Сравнение",
   settings: "Настройки",
 };
 
@@ -44,25 +52,38 @@ function Dashboard() {
   const pathname = usePathname();
   const params = useSearchParams();
   const accountsQ = useApi<{ accounts: Account[]; lastRun: SyncRun | null }>("/api/accounts");
+  const tgQ = useApi<{ channels: TgChannel[]; session: TgSession }>("/api/tg/channels");
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [postId, setPostId] = useState<string | null>(null);
 
   const allAccounts = accountsQ.data?.accounts || [];
   const accounts = useMemo(() => allAccounts.filter((a) => a.is_active !== false), [allAccounts]);
+  const allTg = tgQ.data?.channels || [];
+  const tgChannels = useMemo(() => allTg.filter((c) => c.is_active), [allTg]);
 
-  const accountParam = params.get("a");
-  const accountId =
-    accountParam === "all" || accounts.some((a) => a.id === accountParam)
-      ? (accountParam as string)
-      : accounts[0]?.id || "all";
-  const account = accounts.find((a) => a.id === accountId) || null;
+  // Что выбрано в меню: аккаунт Instagram, "all", "tg:all" или "tg:<id канала>"
+  const sel = params.get("a");
+  let selection: string;
+  if (sel === "all" || sel === "tg:all" || accounts.some((a) => a.id === sel) || tgChannels.some((c) => `tg:${c.id}` === sel)) {
+    selection = sel as string;
+  } else {
+    selection = accounts[0]?.id || (tgChannels[0] ? `tg:${tgChannels[0].id}` : "all");
+  }
+  const isTg = selection.startsWith("tg:");
+  const account = isTg ? null : accounts.find((a) => a.id === selection) || null;
+  const tgChannel = isTg ? tgChannels.find((c) => `tg:${c.id}` === selection) || null : null;
+  const single = isTg ? !!tgChannel : !!account;
 
-  let view = (params.get("v") as View) || (account ? "overview" : "compare");
-  if (!account && (view === "overview" || view === "audience")) view = "compare";
-  if (account && view === "compare") view = "overview";
+  let view = (params.get("v") as View) || (single ? "overview" : "compare");
+  if (view !== "settings") {
+    if (!single && (view === "overview" || view === "audience")) view = "compare";
+    if (single && view === "compare") view = "overview";
+    if (isTg && (view === "stories" || view === "audience")) view = single ? "overview" : "compare";
+  }
 
-  const period = resolvePeriod(params.get("p"), params.get("from"), params.get("to"));
+  const lastDay = isTg ? dateInTz(new Date(), LOCAL_TZ) : lastCompleteMetaDay();
+  const period = resolvePeriod(params.get("p"), params.get("from"), params.get("to"), lastDay);
 
   const update = useCallback(
     // undefined — не менять параметр, null — убрать его
@@ -89,25 +110,33 @@ function Dashboard() {
     },
     [allAccounts]
   );
+  const tgColorFor = useCallback(
+    (id: string) => {
+      const i = allTg.findIndex((c) => c.id === id);
+      return i >= 0 && i < SERIES.length ? SERIES[i] : "#8a929e";
+    },
+    [allTg]
+  );
 
   const ctx: Ctx = {
     accounts,
     account,
-    accountId,
+    accountId: isTg ? "all" : selection,
+    tgChannels,
+    tgChannel,
     from: period.from,
     to: period.to,
     colorFor,
+    tgColorFor,
     openPost: setPostId,
     reloadAccounts: accountsQ.reload,
+    reloadTg: tgQ.reload,
   };
 
   if (accountsQ.error && !accountsQ.data) {
     return (
       <div className="p-6 max-w-2xl mx-auto mt-10">
         <ErrorNote error={accountsQ.error} />
-        <p className="text-sm text-sub mt-3">
-          Если вы только что обновили сайт, проверьте, что файл supabase/schema.sql выполнен в Supabase (инструкция в README).
-        </p>
       </div>
     );
   }
@@ -120,11 +149,54 @@ function Dashboard() {
     );
   }
 
+  const subtitle = isTg
+    ? tgChannel
+      ? `Telegram · ${tgChannel.title}${tgChannel.username ? ` · @${tgChannel.username}` : ""}`
+      : `Telegram · все каналы · ${tgChannels.length}`
+    : account
+      ? `${account.display_name} · @${account.username}`
+      : `Instagram · все аккаунты · ${accounts.length}`;
+
+  const openSettings = () => update({ v: "settings" });
+  let content: React.ReactNode;
+  if (view === "settings") {
+    content = <SettingsView ctx={ctx} allAccounts={allAccounts} tgChannels={allTg} tgSession={tgQ.data?.session || null} />;
+  } else if (isTg) {
+    if (tgChannels.length === 0) {
+      content = (
+        <div className="rounded-xl border border-line bg-card p-6 text-sm text-sub">
+          Telegram-каналы не подключены. Добавьте их в разделе{" "}
+          <button className="text-accent underline" onClick={openSettings}>
+            «Настройки»
+          </button>
+          .
+        </div>
+      );
+    } else if (view === "posts") content = <TgPostsView ctx={ctx} />;
+    else if (tgChannel) content = <TgOverviewView ctx={ctx} onOpenSettings={openSettings} />;
+    else content = <TgCompareView ctx={ctx} onOpenChannel={(id) => update({ a: `tg:${id}`, v: "overview" })} />;
+  } else if (accounts.length === 0) {
+    content = (
+      <div className="rounded-xl border border-line bg-card p-6 text-sm text-sub">
+        Нет отслеживаемых аккаунтов. Подключите их в разделе{" "}
+        <button className="text-accent underline" onClick={openSettings}>
+          «Настройки»
+        </button>
+        .
+      </div>
+    );
+  } else if (view === "overview") content = <OverviewView ctx={ctx} />;
+  else if (view === "posts") content = <PostsView ctx={ctx} />;
+  else if (view === "stories") content = <StoriesView ctx={ctx} onOpenSettings={openSettings} />;
+  else if (view === "audience") content = <AudienceView ctx={ctx} />;
+  else content = <CompareView ctx={ctx} onOpenAccount={(id) => update({ a: id, v: "overview" })} />;
+
   return (
     <div className="min-h-screen lg:pl-[248px]">
       <Sidebar
         accounts={accounts}
-        accountId={accountId}
+        tgChannels={tgChannels}
+        selection={selection}
         view={view}
         lastRun={accountsQ.data.lastRun}
         open={menuOpen}
@@ -138,10 +210,10 @@ function Dashboard() {
             <IconMenu width={22} height={22} />
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-lg font-semibold text-ink">{TITLES[view]}</h1>
-            <p className="truncate text-xs text-muted">
-              {account ? `${account.display_name} · @${account.username}` : `Все аккаунты · ${accounts.length}`}
-            </p>
+            <h1 className="truncate text-lg font-semibold text-ink">
+              {view === "posts" && isTg ? "Посты" : TITLES[view]}
+            </h1>
+            <p className="truncate text-xs text-muted">{view === "settings" ? "Аккаунты, каналы и сбор статистики" : subtitle}</p>
           </div>
           {view !== "settings" && (
             <div className="flex w-full items-center gap-2 sm:w-auto">
@@ -149,6 +221,7 @@ function Dashboard() {
                 preset={period.preset}
                 from={period.from}
                 to={period.to}
+                max={lastDay}
                 onChange={({ p, from, to }) => update({ p, from, to })}
               />
               <Button variant="primary" onClick={() => setReportOpen(true)}>
@@ -160,35 +233,14 @@ function Dashboard() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1400px] px-4 py-5 sm:px-6">
-        {accounts.length === 0 && view !== "settings" ? (
-          <div className="rounded-xl border border-line bg-card p-6 text-sm text-sub">
-            Нет отслеживаемых аккаунтов. Подключите их в разделе{" "}
-            <button className="text-accent underline" onClick={() => update({ v: "settings" })}>
-              «Настройки»
-            </button>
-            .
-          </div>
-        ) : view === "overview" ? (
-          <OverviewView ctx={ctx} />
-        ) : view === "posts" ? (
-          <PostsView ctx={ctx} />
-        ) : view === "stories" ? (
-          <StoriesView ctx={ctx} onOpenSettings={() => update({ v: "settings" })} />
-        ) : view === "audience" ? (
-          <AudienceView ctx={ctx} />
-        ) : view === "compare" ? (
-          <CompareView ctx={ctx} onOpenAccount={(id) => update({ a: id, v: "overview" })} />
-        ) : (
-          <SettingsView ctx={ctx} allAccounts={allAccounts} />
-        )}
-      </main>
+      <main className="mx-auto max-w-[1400px] px-4 py-5 sm:px-6">{content}</main>
 
       <ReportDialog
         open={reportOpen}
         onClose={() => setReportOpen(false)}
         accounts={accounts}
-        defaultAccountId={accountId}
+        tgChannels={tgChannels}
+        defaultSelection={selection}
         from={period.from}
         to={period.to}
       />

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import type { Ctx } from "@/app/dashboard/page";
-import type { Account, SyncRun } from "@/lib/types";
+import type { Account, SyncRun, TgChannel, TgSession } from "@/lib/types";
+import { TelegramSettings } from "./TelegramSettings";
 import { fmtAgo, fmtCompact, fmtDateTime } from "@/lib/format";
 import { getJson, postJson, useApi } from "../useApi";
 import { Avatar, Button, Card, CardHeader, Spinner, cx } from "../ui";
@@ -10,7 +11,17 @@ import { IconCheck, IconRefresh, IconUserPlus } from "../icons";
 
 type Available = { id: string; username: string; name?: string; profile_picture_url?: string; followers_count?: number; page_name: string };
 
-export function SettingsView({ ctx, allAccounts }: { ctx: Ctx; allAccounts: Account[] }) {
+export function SettingsView({
+  ctx,
+  allAccounts,
+  tgChannels,
+  tgSession,
+}: {
+  ctx: Ctx;
+  allAccounts: Account[];
+  tgChannels: TgChannel[];
+  tgSession: TgSession | null;
+}) {
   const runs = useApi<{ runs: SyncRun[] }>("/api/sync");
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<string[]>([]);
@@ -223,6 +234,8 @@ export function SettingsView({ ctx, allAccounts }: { ctx: Ctx; allAccounts: Acco
           </ul>
         </div>
       </Card>
+
+      <TelegramSettings session={tgSession} channels={tgChannels} onChanged={ctx.reloadTg} />
 
       <Card className="xl:col-span-2">
         <CardHeader title="Что важно знать про данные Instagram" />

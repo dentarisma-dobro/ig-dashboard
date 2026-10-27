@@ -277,7 +277,8 @@ export function TimeChart({
               name={s.label}
               stroke={s.color}
               strokeWidth={2}
-              dot={false}
+              // Пока точек мало (история только начала копиться), показываем их, иначе линии не видно
+              dot={data.filter((p) => p[s.key] != null).length < 3 ? { r: 4, fill: s.color, stroke: "#fff", strokeWidth: 2 } : false}
               activeDot={{ r: 4, stroke: "#fff", strokeWidth: 2 }}
               connectNulls={connectNulls}
               isAnimationActive={false}

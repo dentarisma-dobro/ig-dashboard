@@ -12,9 +12,9 @@ export const PRESETS: { id: Exclude<PresetId, "custom">; label: string }[] = [
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// Период заканчивается последними завершёнными сутками Instagram
-export function resolvePeriod(preset: string | null, from?: string | null, to?: string | null) {
-  const last = lastCompleteMetaDay();
+// Период заканчивается днём last: для Instagram это последние завершённые сутки Instagram,
+// для Telegram сегодняшний день по Москве (данные Telegram приходят сразу)
+export function resolvePeriod(preset: string | null, from?: string | null, to?: string | null, last = lastCompleteMetaDay()) {
   const monthStart = (d: string) => d.slice(0, 8) + "01";
   switch (preset) {
     case "7":

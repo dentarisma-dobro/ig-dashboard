@@ -2,8 +2,8 @@
 // поэтому кириллица отображается правильно. Графики векторные.
 
 import { Document, Font, Image, Line, Page, Path, Rect, StyleSheet, Svg, Text, View } from "@react-pdf/renderer";
-import type { AccountReport, DayPoint, ReportData, ReportPost } from "./data";
-import { fmtAxis, fmtCompact, fmtDateTime, fmtDay, fmtNum, fmtPct, fmtRange, fmtSigned, pctChange } from "../format";
+import type { AccountReport, DayPoint, ReportData, ReportPost, TgReport } from "./data";
+import { fmtAxis, fmtCompact, fmtDateTime, fmtDay, fmtDayLong, fmtNum, fmtPct, fmtRange, fmtSigned, pctChange } from "../format";
 import { KIND_LABEL, topEntries } from "../metrics";
 
 let fontsReady = false;
@@ -263,7 +263,7 @@ function shortCaption(p: ReportPost) {
 function Footer({ generatedAt }: { generatedAt: string }) {
   return (
     <View style={s.footer} fixed>
-      <Text>Статистика Instagram · сформировано {fmtDateTime(generatedAt)}</Text>
+      <Text>Статистика Instagram и Telegram · сформировано {fmtDateTime(generatedAt)}</Text>
       <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
     </View>
   );
@@ -564,15 +564,249 @@ function ComparisonPage({ data }: { data: ReportData }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Telegram
+// ---------------------------------------------------------------------------
+
+const TG_MEDIA: Record<string, string> = { text: "Текст", photo: "Фото", album: "Альбом", video: "Видео", audio: "Аудио", file: "Файл", poll: "Опрос", other: "Пост" };
+
+function tgCaption(text: string | null) {
+  const t = plainText(text || "") || "Без текста";
+  return t.length > 80 ? t.slice(0, 78) + "…" : t;
+}
+
+function TgComparisonPage({ data }: { data: ReportData }) {
+  const w = CONTENT_W - 20;
+  return (
+    <Page size="A4" style={s.page}>
+      <Text style={{ fontSize: 7.5, color: C.muted, letterSpacing: 0.4 }}>ОТЧЁТ ПО TELEGRAM</Text>
+      <Text style={s.h1}>Сравнение каналов</Text>
+      <Text style={{ color: C.sub, marginTop: 2, marginBottom: 12 }}>
+        {fmtRange(data.from, data.to)} · сравнение с периодом {fmtRange(data.prevFrom, data.prevTo)}
+      </Text>
+      <View style={s.card}>
+        <Table
+          rows={data.tg}
+          cols={[
+            {
+              title: "Канал",
+              width: w * 0.24,
+              render: (r) => (
+                <View style={[s.row, { alignItems: "center" }]}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, marginRight: 5, backgroundColor: C.series[data.tg.indexOf(r) % C.series.length] }} />
+                  <View>
+                    <Text style={{ fontWeight: 600 }}>{plainText(r.channel.title)}</Text>
+                    <Text style={{ fontSize: 7, color: C.muted }}>{r.channel.is_own ? "свой" : "конкурент"}{r.channel.username ? ` · @${r.channel.username}` : ""}</Text>
+                  </View>
+                </View>
+              ),
+            },
+            { title: "Подписчики", width: w * 0.11, align: "right", render: (r) => <T>{fmtNum(r.cur.subsEnd)}</T> },
+            {
+              title: "Прирост",
+              width: w * 0.09,
+              align: "right",
+              render: (r) => <T color={(r.cur.subsDelta || 0) > 0 ? C.up : (r.cur.subsDelta || 0) < 0 ? C.down : undefined}>{fmtSigned(r.cur.subsDelta)}</T>,
+            },
+            { title: "Постов", width: w * 0.08, align: "right", render: (r) => <T>{fmtNum(r.cur.posts)}</T> },
+            { title: "Охват поста", width: w * 0.11, align: "right", render: (r) => <T>{fmtNum(r.cur.viewsAvg)}</T> },
+            { title: "За 24 ч", width: w * 0.09, align: "right", render: (r) => <T>{fmtNum(r.cur.views24Avg)}</T> },
+            { title: "ERR", width: w * 0.09, align: "right", render: (r) => <T>{fmtPct(r.cur.err, 1)}</T> },
+            { title: "ER", width: w * 0.09, align: "right", render: (r) => <T>{fmtPct(r.cur.er, 2)}</T> },
+            { title: "Реакции", width: w * 0.1, align: "right", render: (r) => <T>{fmtNum(r.cur.reactions)}</T> },
+          ]}
+        />
+      </View>
+      <Text style={[s.note, { marginTop: 8 }]}>
+        ERR = просмотры поста / подписчики; ER = (реакции + репосты + комментарии) / просмотры. Средние по постам периода.
+      </Text>
+      <Footer generatedAt={data.generatedAt} />
+    </Page>
+  );
+}
+
+function TgChannelPage({ r, data, avatar }: { r: TgReport; data: ReportData; avatar?: string | null }) {
+  const { cur, prev, channel } = r;
+  const dates = r.days.map((d) => d.date);
+  const top = [...r.posts].sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 10);
+  const w = CONTENT_W - 20;
+  return (
+    <Page size="A4" style={s.page}>
+      <View style={[s.row, { alignItems: "center", marginBottom: 12 }]}>
+        {avatar ? (
+          <Image src={avatar} style={{ width: 44, height: 44, borderRadius: 22, marginRight: 12 }} />
+        ) : (
+          <View style={{ width: 44, height: 44, borderRadius: 22, marginRight: 12, backgroundColor: "#eaf2fc" }} />
+        )}
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 7.5, color: C.muted, letterSpacing: 0.4 }}>
+            ОТЧЁТ ПО TELEGRAM · {channel.is_own ? "СВОЙ КАНАЛ" : "КОНКУРЕНТ"}
+          </Text>
+          <Text style={s.h1}>{plainText(channel.title)}</Text>
+          <Text style={{ color: C.sub, marginTop: 1 }}>
+            {channel.username ? `@${channel.username} · ` : ""}
+            {fmtRange(data.from, data.to)}
+          </Text>
+        </View>
+        <View style={{ alignItems: "flex-end" }}>
+          <Text style={{ fontSize: 16, fontWeight: 600 }}>{fmtNum(cur.subsEnd ?? channel.subscribers)}</Text>
+          <Text style={s.note}>подписчиков</Text>
+        </View>
+      </View>
+
+      <View style={[s.row, { flexWrap: "wrap", marginRight: -6 }]}>
+        <Kpi label="Прирост подписчиков" value={fmtSigned(cur.subsDelta)}>
+          <Text style={s.note}>
+            {cur.joined != null ? `+${fmtNum(cur.joined)} подписались, −${fmtNum(cur.left)} отписались` : "по замерам сайта"}
+          </Text>
+        </Kpi>
+        <Kpi label="Публикации" value={fmtNum(cur.posts)}>
+          <DeltaText cur={cur.posts} prev={prev.posts} />
+        </Kpi>
+        <Kpi label="Средний охват поста" value={fmtNum(cur.viewsAvg)}>
+          <DeltaText cur={cur.viewsAvg} prev={prev.viewsAvg} />
+        </Kpi>
+        <Kpi label="Охват за 24 часа" value={fmtNum(cur.views24Avg)}>
+          <DeltaText cur={cur.views24Avg} prev={prev.views24Avg} />
+        </Kpi>
+        <Kpi label="ERR" value={fmtPct(cur.err, 1)}>
+          <DeltaText cur={cur.err} prev={prev.err} mode="pp" />
+        </Kpi>
+        <Kpi label="ERR24" value={fmtPct(cur.err24, 1)}>
+          <DeltaText cur={cur.err24} prev={prev.err24} mode="pp" />
+        </Kpi>
+        <Kpi label="ER (вовлечённость)" value={fmtPct(cur.er, 2)}>
+          <DeltaText cur={cur.er} prev={prev.er} mode="pp" />
+        </Kpi>
+        <Kpi label="Реакции / репосты" value={`${fmtNum(cur.reactions)} / ${fmtNum(cur.forwards)}`}>
+          <Text style={s.note}>комментариев {fmtNum(cur.comments)}</Text>
+        </Kpi>
+      </View>
+
+      <ChartBlock title="Подписчики" subtitle="Число подписчиков на конец дня">
+        {(() => {
+          const known = r.days.filter((d) => d.subscribers != null);
+          // Telegram не отдаёт прошлое число подписчиков: пока замер один, графика нет
+          if (known.length < 2) {
+            return (
+              <Text style={s.note}>
+                История подписчиков копится с {known[0] ? fmtDayLong(known[0].date) : "дня подключения канала"}, график появится со
+                второго дня замеров.
+              </Text>
+            );
+          }
+          return <PdfChart kind="line" values={r.days.map((d) => d.subscribers)} dates={dates} zero={false} />;
+        })()}
+      </ChartBlock>
+      {r.ownStats ? (
+        <>
+          <ChartBlock
+            title="Подписки и отписки"
+            subtitle="По встроенной статистике Telegram"
+            legend={[
+              { label: "Подписались", color: C.blue },
+              { label: "Отписались", color: C.red },
+            ]}
+          >
+            <PdfChart kind="bar" values={r.days.map((d) => d.follows)} negative={r.days.map((d) => d.unfollows)} dates={dates} height={110} />
+          </ChartBlock>
+          <ChartBlock title="Просмотры канала по дням" subtitle="Все просмотры за день по статистике Telegram">
+            <PdfChart kind="bar" values={r.days.map((d) => d.views)} dates={dates} />
+          </ChartBlock>
+        </>
+      ) : (
+        <ChartBlock title="Просмотры постов по дню публикации" subtitle="Сумма текущих просмотров постов, вышедших в этот день">
+          <PdfChart kind="bar" values={r.days.map((d) => d.postViews)} dates={dates} />
+        </ChartBlock>
+      )}
+
+      <View style={[s.section, s.card]} wrap={top.length > 6} minPresenceAhead={120}>
+        <Text style={[s.h2, { marginBottom: 6 }]}>Лучшие посты по просмотрам</Text>
+        {top.length === 0 ? (
+          <Text style={s.note}>За период нет постов</Text>
+        ) : (
+          <Table
+            rows={top}
+            cols={[
+              {
+                title: "Пост",
+                width: w * 0.46,
+                render: (p) => (
+                  <View style={{ width: w * 0.44 }}>
+                    <Text style={{ fontSize: 7, color: C.muted }}>
+                      {TG_MEDIA[p.media_type || "other"] || "Пост"} · {fmtDateTime(p.posted_at)}
+                    </Text>
+                    <Text style={{ fontSize: 7.5 }}>{tgCaption(p.text)}</Text>
+                  </View>
+                ),
+              },
+              { title: "Просм.", width: w * 0.1, align: "right", render: (p) => <T bold>{fmtNum(p.views)}</T> },
+              { title: "24 ч", width: w * 0.09, align: "right", render: (p) => <T>{fmtNum(p.views_24h)}</T> },
+              { title: "ERR", width: w * 0.09, align: "right", render: (p) => <T>{fmtPct(p.err, 0)}</T> },
+              { title: "Реакц.", width: w * 0.09, align: "right", render: (p) => <T>{fmtNum(p.reactions)}</T> },
+              { title: "Репост", width: w * 0.09, align: "right", render: (p) => <T>{fmtNum(p.forwards)}</T> },
+              { title: "Комм.", width: w * 0.08, align: "right", render: (p) => <T>{fmtNum(p.comments)}</T> },
+            ]}
+          />
+        )}
+      </View>
+
+      {r.summary && (
+        <View style={[s.section, s.row]} wrap={false}>
+          <View style={[s.card, { flex: 1, marginRight: 8 }]}>
+            <Text style={[s.h2, { marginBottom: 6 }]}>Статистика Telegram</Text>
+            {[
+              ["Уведомления включены", fmtPct(r.summary.notificationsPercent, 1)],
+              ["Просмотров на пост", fmtNum(r.summary.viewsPerPost.current, 1)],
+              ["Репостов на пост", fmtNum(r.summary.sharesPerPost.current, 1)],
+              ["Реакций на пост", fmtNum(r.summary.reactionsPerPost.current, 1)],
+            ].map(([k, v]) => (
+              <View key={k} style={[s.row, { justifyContent: "space-between", paddingVertical: 2.5, borderBottomWidth: 0.5, borderBottomColor: C.grid }]}>
+                <Text style={{ color: C.sub }}>{k}</Text>
+                <Text style={{ fontWeight: 600 }}>{v}</Text>
+              </View>
+            ))}
+            <Text style={[s.note, { marginTop: 4 }]}>
+              за {r.summary.period.from} – {r.summary.period.to}
+            </Text>
+          </View>
+          <View style={[s.card, { flex: 1 }]}>
+            <Text style={[s.h2, { marginBottom: 6 }]}>Источники просмотров</Text>
+            {r.summary.viewsBySource.length === 0 ? (
+              <Text style={s.note}>Нет данных</Text>
+            ) : (
+              (() => {
+                const total = r.summary!.viewsBySource.reduce((a, b) => a + b.value, 0) || 1;
+                return r.summary!.viewsBySource.slice(0, 6).map((src) => (
+                  <View key={src.name} style={[s.row, { justifyContent: "space-between", paddingVertical: 2 }]}>
+                    <Text style={{ fontSize: 8 }}>{plainText(src.name)}</Text>
+                    <Text style={{ fontSize: 8, color: C.sub }}>{fmtPct((src.value / total) * 100, 0)}</Text>
+                  </View>
+                ));
+              })()
+            )}
+          </View>
+        </View>
+      )}
+
+      <Text style={[s.note, { marginTop: 10 }]}>
+        Сравнение с периодом {fmtRange(data.prevFrom, data.prevTo)}. Время постов по Москве.
+        {channel.is_own ? "" : " История подписчиков конкурента копится с дня его добавления на сайт."}
+      </Text>
+      <Footer generatedAt={data.generatedAt} />
+    </Page>
+  );
+}
+
 export function ReportDocument({
   data,
   images,
 }: {
   data: ReportData;
-  images: Record<string, string | null>; // id поста или "avatar:<id аккаунта>" -> data URL
+  images: Record<string, string | null>; // id поста, "avatar:<id аккаунта>" или "tg:<id канала>" -> data URL
 }) {
   return (
-    <Document title={`Отчёт Instagram ${fmtRange(data.from, data.to)}`} author="Статистика Instagram" language="ru">
+    <Document title={`Отчёт ${fmtRange(data.from, data.to)}`} author="Статистика Instagram и Telegram" language="ru">
       {data.accounts.length > 1 && <ComparisonPage data={data} />}
       {data.accounts.map((r) => (
         <Page key={r.account.id} size="A4" style={s.page}>
@@ -587,6 +821,10 @@ export function ReportDocument({
           </Text>
           <Footer generatedAt={data.generatedAt} />
         </Page>
+      ))}
+      {data.tg.length > 1 && <TgComparisonPage data={data} />}
+      {data.tg.map((r) => (
+        <TgChannelPage key={r.channel.id} r={r} data={data} avatar={images[`tg:${r.channel.id}`]} />
       ))}
     </Document>
   );

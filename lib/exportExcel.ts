@@ -1,9 +1,10 @@
-// Выгрузка в Excel (.xlsx): сводка, статистика по дням, публикации и Stories.
-// Библиотека exceljs грузится только по нажатию кнопки.
+// Выгрузка в Excel (.xlsx): сводка, статистика по дням, публикации и Stories Instagram,
+// сводка, дни и посты Telegram. Библиотека exceljs грузится только по нажатию кнопки.
 
 import type { ReportData } from "./report/data";
 import { dateInTz, LOCAL_TZ } from "./dates";
 import { KIND_LABEL } from "./metrics";
+import { TG_MEDIA_LABEL, tgPostLink } from "./tgmetrics";
 import { fmtRange } from "./format";
 import { reportFileName, saveBlob } from "./exportPdf";
 
@@ -16,24 +17,19 @@ function localDateTime(iso: string) {
 }
 
 const pct = (v: number | null) => (v == null ? null : v / 100);
+const round = (v: number | null) => (v == null ? null : Math.round(v));
 
-export async function downloadExcelReport(data: ReportData) {
-  const ExcelJS = (await import("exceljs")).default;
-  const wb = new ExcelJS.Workbook();
-  wb.creator = "Статистика Instagram";
-  wb.created = new Date();
+function header(ws: any) {
+  const row = ws.getRow(1);
+  row.font = { bold: true };
+  row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF4F6F8" } };
+  row.alignment = { vertical: "middle", wrapText: true };
+  row.height = 30;
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+}
 
-  const header = (ws: any) => {
-    const row = ws.getRow(1);
-    row.font = { bold: true };
-    row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF4F6F8" } };
-    row.alignment = { vertical: "middle", wrapText: true };
-    row.height = 30;
-    ws.views = [{ state: "frozen", ySplit: 1 }];
-  };
-
-  // Сводка
-  const summary = wb.addWorksheet("Сводка");
+function addInstagram(wb: any, data: ReportData) {
+  const summary = wb.addWorksheet("Instagram сводка");
   summary.columns = [
     { header: "Аккаунт", key: "name", width: 24 },
     { header: "Username", key: "username", width: 22 },
@@ -63,13 +59,13 @@ export async function downloadExcelReport(data: ReportData) {
       delta: r.cur.followersDelta,
       follows: r.cur.follows,
       unfollows: r.cur.unfollows,
-      reach: r.cur.reachAvg == null ? null : Math.round(r.cur.reachAvg),
+      reach: round(r.cur.reachAvg),
       views: r.cur.viewsSum,
       pv: r.cur.profileViewsSum,
       inter: r.cur.interactionsSum,
       clicks: r.cur.websiteClicksSum,
       posts: r.cur.posts,
-      postReach: r.cur.postsReachAvg == null ? null : Math.round(r.cur.postsReachAvg),
+      postReach: round(r.cur.postsReachAvg),
       er: pct(r.cur.er),
       err: pct(r.cur.err),
       likes: r.cur.likes,
@@ -85,8 +81,7 @@ export async function downloadExcelReport(data: ReportData) {
   summary.addRow([`Период: ${fmtRange(data.from, data.to)}`]);
   summary.addRow(["ER = (лайки + комментарии + сохранения + репосты) / подписчики; ERR = то же / охват публикации"]);
 
-  // По дням
-  const days = wb.addWorksheet("По дням");
+  const days = wb.addWorksheet("Instagram по дням");
   days.columns = [
     { header: "Аккаунт", key: "name", width: 22 },
     { header: "Дата", key: "date", width: 12, style: { numFmt: "dd.mm.yyyy" } },
@@ -117,8 +112,7 @@ export async function downloadExcelReport(data: ReportData) {
   }
   header(days);
 
-  // Публикации
-  const posts = wb.addWorksheet("Публикации");
+  const posts = wb.addWorksheet("Instagram публикации");
   posts.columns = [
     { header: "Аккаунт", key: "name", width: 20 },
     { header: "Дата и время (Мск)", key: "date", width: 17, style: { numFmt: "dd.mm.yyyy hh:mm" } },
@@ -155,8 +149,7 @@ export async function downloadExcelReport(data: ReportData) {
   }
   header(posts);
 
-  // Stories
-  const stories = wb.addWorksheet("Stories");
+  const stories = wb.addWorksheet("Instagram Stories");
   stories.columns = [
     { header: "Аккаунт", key: "name", width: 20 },
     { header: "Дата и время (Мск)", key: "date", width: 17, style: { numFmt: "dd.mm.yyyy hh:mm" } },
@@ -187,7 +180,122 @@ export async function downloadExcelReport(data: ReportData) {
     }
   }
   header(stories);
+}
 
+function addTelegram(wb: any, data: ReportData) {
+  const summary = wb.addWorksheet("Telegram сводка");
+  summary.columns = [
+    { header: "Канал", key: "title", width: 26 },
+    { header: "Username", key: "username", width: 20 },
+    { header: "Тип", key: "own", width: 11 },
+    { header: "Подписчики на конец периода", key: "subs", width: 14 },
+    { header: "Прирост", key: "delta", width: 10 },
+    { header: "Подписались", key: "joined", width: 12 },
+    { header: "Отписались", key: "left", width: 12 },
+    { header: "Постов", key: "posts", width: 9 },
+    { header: "Средний охват поста", key: "views", width: 13 },
+    { header: "Охват за 24 часа", key: "views24", width: 12 },
+    { header: "ERR", key: "err", width: 9, style: { numFmt: "0.0%" } },
+    { header: "ERR24", key: "err24", width: 9, style: { numFmt: "0.0%" } },
+    { header: "ER", key: "er", width: 9, style: { numFmt: "0.00%" } },
+    { header: "Реакции", key: "reactions", width: 10 },
+    { header: "Репосты", key: "forwards", width: 10 },
+    { header: "Комментарии", key: "comments", width: 12 },
+  ];
+  for (const r of data.tg) {
+    summary.addRow({
+      title: r.channel.title,
+      username: r.channel.username ? "@" + r.channel.username : "",
+      own: r.channel.is_own ? "свой" : "конкурент",
+      subs: r.cur.subsEnd,
+      delta: r.cur.subsDelta,
+      joined: r.cur.joined,
+      left: r.cur.left,
+      posts: r.cur.posts,
+      views: round(r.cur.viewsAvg),
+      views24: round(r.cur.views24Avg),
+      err: pct(r.cur.err),
+      err24: pct(r.cur.err24),
+      er: pct(r.cur.er),
+      reactions: r.cur.reactions,
+      forwards: r.cur.forwards,
+      comments: r.cur.comments,
+    });
+  }
+  header(summary);
+  summary.addRow([]);
+  summary.addRow([`Период: ${fmtRange(data.from, data.to)}`]);
+  summary.addRow(["ERR = просмотры поста / подписчики; ERR24 = просмотры за первые сутки / подписчики; ER = (реакции + репосты + комментарии) / просмотры"]);
+
+  const days = wb.addWorksheet("Telegram по дням");
+  days.columns = [
+    { header: "Канал", key: "title", width: 24 },
+    { header: "Дата", key: "date", width: 12, style: { numFmt: "dd.mm.yyyy" } },
+    { header: "Подписчики", key: "subs", width: 12 },
+    { header: "Подписались", key: "joined", width: 12 },
+    { header: "Отписались", key: "left", width: 12 },
+    { header: "Просмотры канала", key: "views", width: 14 },
+    { header: "Просмотры постов дня", key: "postViews", width: 16 },
+  ];
+  for (const r of data.tg) {
+    for (const d of r.days) {
+      days.addRow({
+        title: r.channel.title,
+        date: new Date(d.date + "T00:00:00Z"),
+        subs: d.subscribers,
+        joined: d.follows,
+        left: d.unfollows,
+        views: d.views,
+        postViews: d.postViews,
+      });
+    }
+  }
+  header(days);
+
+  const posts = wb.addWorksheet("Telegram посты");
+  posts.columns = [
+    { header: "Канал", key: "title", width: 22 },
+    { header: "Дата и время (Мск)", key: "date", width: 17, style: { numFmt: "dd.mm.yyyy hh:mm" } },
+    { header: "Тип", key: "type", width: 9 },
+    { header: "Текст", key: "text", width: 50 },
+    { header: "Просмотры", key: "views", width: 11 },
+    { header: "За 24 часа", key: "views24", width: 11 },
+    { header: "ERR", key: "err", width: 9, style: { numFmt: "0.0%" } },
+    { header: "Реакции", key: "reactions", width: 10 },
+    { header: "Репосты", key: "forwards", width: 10 },
+    { header: "Комментарии", key: "comments", width: 12 },
+    { header: "ER", key: "er", width: 9, style: { numFmt: "0.00%" } },
+    { header: "Ссылка", key: "link", width: 34 },
+  ];
+  for (const r of data.tg) {
+    for (const p of r.posts) {
+      const link = tgPostLink(r.channel, p);
+      posts.addRow({
+        title: r.channel.title,
+        date: localDateTime(p.posted_at),
+        type: TG_MEDIA_LABEL[p.media_type || "other"] || "",
+        text: (p.text || "").replace(/\s+/g, " ").slice(0, 500),
+        views: p.views,
+        views24: p.views_24h,
+        err: pct(p.err),
+        reactions: p.reactions,
+        forwards: p.forwards,
+        comments: p.comments,
+        er: pct(p.er),
+        link: link ? { text: link, hyperlink: link } : null,
+      });
+    }
+  }
+  header(posts);
+}
+
+export async function downloadExcelReport(data: ReportData) {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Статистика Instagram и Telegram";
+  wb.created = new Date();
+  if (data.accounts.length) addInstagram(wb, data);
+  if (data.tg.length) addTelegram(wb, data);
   const buffer = await wb.xlsx.writeBuffer();
   saveBlob(
     new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),

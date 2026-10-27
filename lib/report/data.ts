@@ -1,6 +1,8 @@
 // Данные для отчёта: собираются в браузере из тех же API, что и дашборд.
 
-import type { Account, AudienceRow, DailyRow, Post, Story } from "../types";
+import type { Account, AudienceRow, DailyRow, Post, Story, TgChannel, TgDaily, TgPost, TgStatsSummary } from "../types";
+import { periodPosts, summarizeTg, tgPostEr, tgPostErr, tgSeries, tgSubsOn, viewsByPublishDay, type TgSummaryCalc } from "../tgmetrics";
+import { addDays, diffDays } from "../dates";
 import {
   followersOn,
   interactions,
@@ -41,6 +43,27 @@ export type AccountReport = {
   audience: AudienceRow | null;
 };
 
+export type TgReportPost = TgPost & { err: number | null; er: number | null };
+
+export type TgDayPoint = {
+  date: string;
+  subscribers: number | null;
+  follows: number | null;
+  unfollows: number | null;
+  views: number | null;
+  postViews: number | null;
+};
+
+export type TgReport = {
+  channel: TgChannel;
+  cur: TgSummaryCalc;
+  prev: TgSummaryCalc;
+  days: TgDayPoint[];
+  ownStats: boolean;
+  posts: TgReportPost[]; // посты периода, новые сверху
+  summary: TgStatsSummary | null;
+};
+
 export type ReportData = {
   from: string;
   to: string;
@@ -48,7 +71,39 @@ export type ReportData = {
   prevTo: string;
   generatedAt: string;
   accounts: AccountReport[];
+  tg: TgReport[];
 };
+
+async function loadTg(channel: TgChannel, from: string, to: string, prevFrom: string, prevTo: string): Promise<TgReport> {
+  const q = `channel=${channel.id}&from=${from}&to=${to}`;
+  const [stats, posts] = await Promise.all([
+    get<{ rows: TgDaily[]; summary: { data: TgStatsSummary } | null }>(`/api/tg/stats?${q}`),
+    get<{ posts: TgPost[] }>(`/api/tg/posts?${q}`),
+  ]);
+  const rows = stats.rows;
+  const series = tgSeries(rows, from, to);
+  const pv = viewsByPublishDay(posts.posts, from, to);
+  return {
+    channel,
+    cur: summarizeTg(rows, posts.posts, from, to, channel.subscribers),
+    prev: summarizeTg(rows, posts.posts, prevFrom, prevTo, channel.subscribers),
+    days: series.map((p, i) => ({
+      date: p.date,
+      subscribers: p.subscribers,
+      follows: p.follows,
+      unfollows: p.unfollowsNeg != null ? -p.unfollowsNeg : null,
+      views: p.views,
+      postViews: pv[i].postViews,
+    })),
+    ownStats: rows.some((r) => r.joined != null || r.views != null),
+    posts: periodPosts(posts.posts, from, to).map((p) => ({
+      ...p,
+      err: tgPostErr(p, tgSubsOn(rows, postDate(p)) ?? channel.subscribers),
+      er: tgPostEr(p),
+    })),
+    summary: stats.summary?.data ?? null,
+  };
+}
 
 async function get<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
@@ -57,9 +112,10 @@ async function get<T>(url: string): Promise<T> {
   return body as T;
 }
 
-export async function loadReportData(accounts: Account[], from: string, to: string): Promise<ReportData> {
-  let prevFrom = from;
-  let prevTo = from;
+export async function loadReportData(accounts: Account[], tgChannels: TgChannel[], from: string, to: string): Promise<ReportData> {
+  const prevTo = addDays(from, -1);
+  const prevFrom = addDays(prevTo, -diffDays(from, to));
+  const tgPart = Promise.all(tgChannels.map((c) => loadTg(c, from, to, prevFrom, prevTo)));
   const parts = await Promise.all(
     accounts.map(async (account): Promise<AccountReport> => {
       const q = `account=${account.id}&from=${from}&to=${to}`;
@@ -69,8 +125,6 @@ export async function loadReportData(accounts: Account[], from: string, to: stri
         get<{ stories: Story[] }>(`/api/stories?${q}`),
         get<{ audience: AudienceRow | null }>(`/api/audience?account=${account.id}`).catch(() => ({ audience: null })),
       ]);
-      prevFrom = stats.prevFrom;
-      prevTo = stats.prevTo;
       const rows = stats.rows;
       const byDate = new Map(rows.map((r) => [r.date, r]));
       const days: DayPoint[] = dateRange(from, to).map((date) => {
@@ -111,5 +165,5 @@ export async function loadReportData(accounts: Account[], from: string, to: stri
       };
     })
   );
-  return { from, to, prevFrom, prevTo, generatedAt: new Date().toISOString(), accounts: parts };
+  return { from, to, prevFrom, prevTo, generatedAt: new Date().toISOString(), accounts: parts, tg: await tgPart };
 }

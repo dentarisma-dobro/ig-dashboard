@@ -111,3 +111,69 @@ export type SyncRun = {
 };
 
 export type Range = { from: string; to: string; prevFrom: string; prevTo: string };
+
+// ---------------------------------------------------------------------------
+// Telegram
+// ---------------------------------------------------------------------------
+
+export type TgChannel = {
+  id: string; // username в нижнем регистре
+  tg_id: string | null;
+  username: string | null;
+  title: string;
+  about: string | null;
+  avatar_url: string | null;
+  is_own: boolean;
+  is_active: boolean;
+  subscribers: number | null;
+  stats_available: boolean | null;
+  history_loaded: boolean;
+  updated_at: string | null;
+};
+
+export type TgDaily = {
+  channel_id: string;
+  date: string;
+  subscribers: number | null;
+  subscribers_source: string | null;
+  joined: number | null;
+  left_count: number | null;
+  views: number | null;
+  shares: number | null;
+};
+
+export type TgPost = {
+  channel_id: string;
+  msg_id: number;
+  posted_at: string;
+  text: string | null;
+  media_type: string | null;
+  views: number | null;
+  forwards: number | null;
+  reactions: number | null;
+  comments: number | null;
+  views_24h: number | null;
+};
+
+export type TgGraph = { names: Record<string, string>; x: number[]; series: Record<string, number[]> };
+
+export type TgStatsSummary = {
+  period: { from: string; to: string };
+  followers: { current: number; previous: number };
+  viewsPerPost: { current: number; previous: number };
+  sharesPerPost: { current: number; previous: number };
+  reactionsPerPost: { current: number; previous: number };
+  notificationsPercent: number | null;
+  viewsBySource: { name: string; value: number }[];
+  followersBySource: { name: string; value: number }[];
+  languages: { name: string; value: number }[];
+  topHours: TgGraph | null;
+};
+
+export type TgSession = {
+  configured: boolean;
+  connected: boolean;
+  pending: string | null;
+  userName: string | null;
+  phone: string | null;
+};

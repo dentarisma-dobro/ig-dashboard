@@ -5,10 +5,12 @@
 // свежие публикации, активные Stories и аудиторию.
 // Кнопки в разделе «Настройки» вызывают те же шаги по одному через /api/sync.
 
-import { getSupabase, MEDIA_BUCKET, selectAll } from "./supabase";
+import { getSupabase, selectAll } from "./supabase";
 import * as ig from "./instagram";
 import { mapPool } from "./pool";
 import { addDays, dateRange, diffDays, lastCompleteMetaDay, todayUtc } from "./dates";
+import { storeImage } from "./storage";
+import { runTelegramSync } from "./tgcollector";
 
 export type AccountRow = {
   id: string;
@@ -82,39 +84,6 @@ export async function addAccount(id: string): Promise<AccountRow> {
   const account = await getAccount(id);
   await syncProfile(account);
   return getAccount(id);
-}
-
-// ---------------------------------------------------------------------------
-// Картинки: Instagram отдаёт временные ссылки, поэтому копируем их в Supabase Storage
-// ---------------------------------------------------------------------------
-
-let bucketReady = false;
-
-async function ensureBucket() {
-  if (bucketReady) return;
-  const sb = getSupabase();
-  const { data } = await sb.storage.getBucket(MEDIA_BUCKET);
-  if (!data) await sb.storage.createBucket(MEDIA_BUCKET, { public: true });
-  bucketReady = true;
-}
-
-export async function storeImage(path: string, src: string): Promise<string | null> {
-  try {
-    await ensureBucket();
-    const res = await fetch(src, { cache: "no-store", signal: AbortSignal.timeout(20000) });
-    if (!res.ok) return null;
-    const type = res.headers.get("content-type") || "image/jpeg";
-    if (!type.startsWith("image/")) return null;
-    const body = new Uint8Array(await res.arrayBuffer());
-    const sb = getSupabase();
-    const { error } = await sb.storage
-      .from(MEDIA_BUCKET)
-      .upload(path, body, { contentType: type, upsert: true, cacheControl: "31536000" });
-    if (error) return null;
-    return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
-  } catch {
-    return null;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -482,24 +451,32 @@ export async function runScheduledSync(source: "cron" | "manual"): Promise<{ ok:
   const runId = await startRun(source);
   const log: string[] = [];
   let ok = true;
-  try {
-    const accounts = await getAccounts();
-    if (accounts.length === 0) log.push("Нет отслеживаемых аккаунтов");
-    const results = await mapPool(accounts, 3, (a) => updateAccount(a, log));
-    ok = results.every(Boolean);
-  } catch (e: any) {
-    ok = false;
-    log.push(`ОШИБКА: ${e?.message || e}`);
-  }
+  const instagram = (async () => {
+    try {
+      const accounts = await getAccounts();
+      if (accounts.length === 0) log.push("Нет отслеживаемых аккаунтов Instagram");
+      const results = await mapPool(accounts, 3, (a) => updateAccount(a, log));
+      return results.every(Boolean);
+    } catch (e: any) {
+      log.push(`ОШИБКА: ${e?.message || e}`);
+      return false;
+    }
+  })();
+  const telegram = runTelegramSync(true).catch((e) => ({ ok: false, log: [`Telegram: ОШИБКА: ${e?.message || e}`] }));
+  const [igOk, tgResult] = await Promise.all([instagram, telegram]);
+  log.push(...tgResult.log);
+  ok = igOk && tgResult.ok;
   await finishRun(runId, ok, log);
   return { ok, log };
 }
 
-// Только Stories: /api/cron/stories вызывается ещё три раза в сутки (Stories живут 24 часа)
+// Промежуточный сбор (/api/cron/stories, три раза в сутки): Stories Instagram, которые живут 24 часа,
+// и свежие посты Telegram, чтобы посчитать их охват за первые сутки
 export async function runStoriesSync(): Promise<{ ok: boolean; log: string[] }> {
   const log: string[] = [];
   let ok = true;
   const accounts = await getAccounts();
+  const telegram = runTelegramSync(false).catch((e) => ({ ok: false, log: [`Telegram: ОШИБКА: ${e?.message || e}`] }));
   await mapPool(accounts, 3, async (a) => {
     try {
       const r = await syncStories(a);
@@ -509,5 +486,7 @@ export async function runStoriesSync(): Promise<{ ok: boolean; log: string[] }> 
       log.push(`@${a.username}: ОШИБКА: ${e?.message || e}`);
     }
   });
-  return { ok, log };
+  const tgResult = await telegram;
+  log.push(...tgResult.log);
+  return { ok: ok && tgResult.ok, log };
 }

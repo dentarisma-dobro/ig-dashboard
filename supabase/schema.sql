@@ -198,3 +198,93 @@ alter table post_daily enable row level security;
 alter table stories enable row level security;
 alter table account_audience enable row level security;
 alter table sync_runs enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- Telegram-каналы (версия 2.1)
+-- ---------------------------------------------------------------------------
+
+-- Сессия аккаунта Telegram, через который сайт читает каналы. Хранится зашифрованной:
+-- ключ шифрования берётся из TG_API_HASH на Vercel и в базе не лежит.
+create table if not exists tg_session (
+  id int primary key default 1 check (id = 1),
+  data text,                        -- зашифрованная сессия
+  pending text,                     -- зашифрованное состояние входа, пока ждём код
+  phone text,                       -- номер со скрытыми цифрами, для показа на сайте
+  user_name text,
+  updated_at timestamptz default now()
+);
+
+create table if not exists tg_channels (
+  id text primary key,              -- username канала в нижнем регистре
+  tg_id text,                       -- внутренний ID канала в Telegram
+  access_hash text,                 -- нужен для запросов через аккаунт без поиска по username
+  username text,
+  title text not null,
+  about text,
+  avatar_url text,
+  is_own boolean not null default false,
+  is_active boolean not null default true,
+  subscribers bigint,
+  stats_available boolean,          -- Telegram отдаёт встроенную статистику (свой канал, аккаунт админ)
+  history_loaded boolean not null default false,
+  created_at timestamptz default now(),
+  updated_at timestamptz
+);
+alter table tg_channels add column if not exists tg_id text;
+
+-- Канал по дням (дата по Москве)
+create table if not exists tg_channel_daily (
+  channel_id text not null references tg_channels(id) on delete cascade,
+  date date not null,
+  subscribers bigint,
+  subscribers_source text,          -- snapshot (замер сайта) | stats (статистика Telegram)
+  joined bigint,                    -- подписались (только свои каналы)
+  left_count bigint,                -- отписались (только свои каналы)
+  views bigint,                     -- просмотры за день (только свои каналы)
+  shares bigint,                    -- репосты за день (только свои каналы)
+  updated_at timestamptz default now(),
+  primary key (channel_id, date)
+);
+
+-- Посты. Альбом из нескольких фото хранится одним постом.
+create table if not exists tg_posts (
+  channel_id text not null references tg_channels(id) on delete cascade,
+  msg_id bigint not null,
+  posted_at timestamptz not null,
+  text text,
+  media_type text,                  -- text | photo | video | album | file | poll | other
+  views bigint,
+  forwards bigint,
+  reactions bigint,
+  comments bigint,
+  views_24h bigint,                 -- просмотры через сутки после выхода
+  updated_at timestamptz default now(),
+  primary key (channel_id, msg_id)
+);
+create index if not exists idx_tg_posts_date on tg_posts(channel_id, posted_at desc);
+
+-- Замеры просмотров свежих постов (по ним считается охват за 24 часа)
+create table if not exists tg_post_snapshots (
+  channel_id text not null,
+  msg_id bigint not null,
+  captured_at timestamptz not null default now(),
+  views bigint,
+  forwards bigint,
+  reactions bigint,
+  primary key (channel_id, msg_id, captured_at)
+);
+
+-- Встроенная статистика Telegram по своим каналам: уведомления, источники, языки, часы
+create table if not exists tg_channel_stats (
+  channel_id text not null references tg_channels(id) on delete cascade,
+  date date not null,
+  data jsonb,
+  primary key (channel_id, date)
+);
+
+alter table tg_session enable row level security;
+alter table tg_channels enable row level security;
+alter table tg_channel_daily enable row level security;
+alter table tg_posts enable row level security;
+alter table tg_post_snapshots enable row level security;
+alter table tg_channel_stats enable row level security;

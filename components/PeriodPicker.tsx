@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { PRESETS, type PresetId } from "@/lib/period";
 import { fmtRange } from "@/lib/format";
-import { lastCompleteMetaDay } from "@/lib/dates";
 import { IconCalendar, IconCheck, IconChevronDown } from "./icons";
 import { Button, cx } from "./ui";
 
@@ -11,18 +10,19 @@ export function PeriodPicker({
   preset,
   from,
   to,
+  max,
   onChange,
 }: {
   preset: PresetId;
   from: string;
   to: string;
+  max: string; // последний день, который можно выбрать
   onChange: (p: { p: PresetId; from?: string; to?: string }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [cFrom, setCFrom] = useState(from);
   const [cTo, setCTo] = useState(to);
   const ref = useRef<HTMLDivElement>(null);
-  const max = lastCompleteMetaDay();
 
   useEffect(() => {
     setCFrom(from);
