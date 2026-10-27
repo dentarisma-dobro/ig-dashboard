@@ -5,7 +5,7 @@ import type { Ctx } from "@/app/dashboard/page";
 import type { TgDaily, TgPost } from "@/lib/types";
 import { dateRange } from "@/lib/dates";
 import { fmtNum, fmtPct, fmtSigned } from "@/lib/format";
-import { summarizeTg, tgSubsOn, viewsByPublishDay, type TgSummaryCalc } from "@/lib/tgmetrics";
+import { summarizeTg, viewsByPublishDay, type TgSummaryCalc } from "@/lib/tgmetrics";
 import { useApi } from "../useApi";
 import { Avatar, Card, CardHeader, Delta, Empty, ErrorNote, Segmented, cx } from "../ui";
 import { ChartCard, TimeChart, type Series } from "../charts";
@@ -41,7 +41,7 @@ export function TgCompareView({ ctx, onOpenChannel }: { ctx: Ctx; onOpenChannel:
       for (const t of table) {
         if (metric === "growth") {
           const base = t.cur.subsStart;
-          const v = tgSubsOn(t.rows, date);
+          const v = t.rows.find((r) => r.date === date)?.subscribers ?? null;
           point[t.ch.id] = base && v != null ? ((v - base) / base) * 100 : null;
         } else {
           point[t.ch.id] = pv.get(t.ch.id)?.[i].postViews ?? null;

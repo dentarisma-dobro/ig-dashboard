@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { Account, SyncRun, TgChannel } from "@/lib/types";
+import type { Account, SyncRun, TgChannel, YtChannel } from "@/lib/types";
 import { fmtAgo, fmtCompact } from "@/lib/format";
 import { Avatar, cx } from "./ui";
 import {
@@ -81,6 +81,7 @@ const Label = ({ children }: { children: ReactNode }) => (
 export function Sidebar({
   accounts,
   tgChannels,
+  ytChannels,
   selection,
   view,
   lastRun,
@@ -90,6 +91,7 @@ export function Sidebar({
 }: {
   accounts: Account[];
   tgChannels: TgChannel[];
+  ytChannels: YtChannel[];
   selection: string;
   view: View;
   lastRun: SyncRun | null;
@@ -97,8 +99,10 @@ export function Sidebar({
   onClose: () => void;
   onSelect: (next: { a?: string; v?: View }) => void;
 }) {
-  const isTg = selection.startsWith("tg:");
-  const single = selection !== "all" && selection !== "tg:all";
+  // Telegram и YouTube показывают только обзор, посты (видео) и сравнение
+  const isTg = selection.startsWith("tg:") || selection.startsWith("yt:");
+  const isYt = selection.startsWith("yt:");
+  const single = selection !== "all" && selection !== "tg:all" && selection !== "yt:all";
   const go = (next: { a?: string; v?: View }) => {
     onSelect(next);
     onClose();
@@ -124,7 +128,7 @@ export function Sidebar({
             <LogoMark className="h-8 w-8" />
             <div className="leading-tight">
               <div className="text-[15px] font-semibold text-ink">Статистика</div>
-              <div className="text-xs text-muted">Instagram и Telegram</div>
+              <div className="text-xs text-muted">Instagram, Telegram, YouTube</div>
             </div>
           </div>
           <button className="lg:hidden text-muted p-1" onClick={onClose} aria-label="Закрыть меню">
@@ -168,6 +172,26 @@ export function Sidebar({
             </button>
           )}
 
+          <Label>YouTube</Label>
+          <NavItem active={selection === "yt:all"} onClick={() => go({ a: "yt:all", v: keep(true, false) })} icon={<IconCompare />}>
+            Все каналы
+          </NavItem>
+          {ytChannels.map((c) => (
+            <SourceItem
+              key={c.id}
+              active={selection === `yt:${c.id}`}
+              onClick={() => go({ a: `yt:${c.id}`, v: keep(true, true) })}
+              avatar={<Avatar account={{ avatar_url: c.avatar_url, display_name: c.title, username: c.handle || "" }} size={30} />}
+              title={c.title}
+              sub={`${c.subscribers != null ? `${fmtCompact(c.subscribers)} подп.` : ""}${c.is_own ? "" : " · конкурент"}`}
+            />
+          ))}
+          {ytChannels.length === 0 && (
+            <button onClick={() => go({ v: "settings" })} className="px-3 py-1.5 text-left text-xs text-accent hover:underline">
+              Подключить каналы
+            </button>
+          )}
+
           <Label>Разделы</Label>
           {single ? (
             <NavItem active={view === "overview"} onClick={() => go({ v: "overview" })} icon={<IconOverview />}>
@@ -179,7 +203,7 @@ export function Sidebar({
             </NavItem>
           )}
           <NavItem active={view === "posts"} onClick={() => go({ v: "posts" })} icon={<IconPosts />}>
-            {isTg ? "Посты" : "Публикации"}
+            {isYt ? "Видео" : isTg ? "Посты" : "Публикации"}
           </NavItem>
           {!isTg && (
             <>

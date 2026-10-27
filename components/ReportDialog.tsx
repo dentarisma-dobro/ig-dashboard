@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Account, TgChannel } from "@/lib/types";
+import type { Account, TgChannel, YtChannel } from "@/lib/types";
 import { fmtRange } from "@/lib/format";
 import { Avatar, Button, Modal, Spinner, cx } from "./ui";
 import { IconFile, IconTable } from "./icons";
@@ -11,6 +11,7 @@ export function ReportDialog({
   onClose,
   accounts,
   tgChannels,
+  ytChannels,
   defaultSelection,
   from,
   to,
@@ -19,12 +20,14 @@ export function ReportDialog({
   onClose: () => void;
   accounts: Account[];
   tgChannels: TgChannel[];
+  ytChannels: YtChannel[];
   defaultSelection: string;
   from: string;
   to: string;
 }) {
   const [igSel, setIgSel] = useState<string[]>([]);
   const [tgSel, setTgSel] = useState<string[]>([]);
+  const [ytSel, setYtSel] = useState<string[]>([]);
   const [format, setFormat] = useState<"pdf" | "xlsx">("pdf");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,9 +37,10 @@ export function ReportDialog({
     const s = defaultSelection;
     setIgSel(s === "all" ? accounts.map((a) => a.id) : accounts.some((a) => a.id === s) ? [s] : []);
     setTgSel(s === "tg:all" ? tgChannels.map((c) => c.id) : s.startsWith("tg:") ? [s.slice(3)] : []);
+    setYtSel(s === "yt:all" ? ytChannels.map((c) => c.id) : s.startsWith("yt:") ? [s.slice(3)] : []);
     setError(null);
     setStatus(null);
-  }, [open, defaultSelection, accounts, tgChannels]);
+  }, [open, defaultSelection, accounts, tgChannels, ytChannels]);
 
   const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
@@ -49,6 +53,7 @@ export function ReportDialog({
       const data = await loadReportData(
         accounts.filter((a) => igSel.includes(a.id)),
         tgChannels.filter((c) => tgSel.includes(c.id)),
+        ytChannels.filter((c) => ytSel.includes(c.id)),
         from,
         to
       );
@@ -78,7 +83,7 @@ export function ReportDialog({
     </label>
   );
 
-  const total = igSel.length + tgSel.length;
+  const total = igSel.length + tgSel.length + ytSel.length;
 
   return (
     <Modal open={open} onClose={status ? () => {} : onClose} title="Скачать отчёт">
@@ -123,7 +128,24 @@ export function ReportDialog({
             </div>
           </div>
         )}
-        {(igSel.length > 1 || tgSel.length > 1) && (
+        {ytChannels.length > 0 && (
+          <div>
+            <p className="mb-2 text-[13px] font-medium text-ink">YouTube</p>
+            <div className="space-y-1.5">
+              {ytChannels.map((c) => (
+                <Row
+                  key={c.id}
+                  checked={ytSel.includes(c.id)}
+                  onChange={() => toggle(ytSel, setYtSel, c.id)}
+                  avatar={<Avatar account={{ avatar_url: c.avatar_url, display_name: c.title, username: c.handle || "" }} size={24} />}
+                  title={c.title}
+                  sub={c.is_own ? "свой" : "конкурент"}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+        {(igSel.length > 1 || tgSel.length > 1 || ytSel.length > 1) && (
           <p className="-mt-3 text-xs text-muted">Если выбрано несколько аккаунтов или каналов, в PDF первой будет страница сравнения.</p>
         )}
 

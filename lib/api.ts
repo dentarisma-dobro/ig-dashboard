@@ -26,6 +26,13 @@ export function parseAccount(req: NextRequest): string | null {
   return a && a !== "all" ? a : null;
 }
 
+// Адрес сайта, с которого пришёл запрос (https://….vercel.app или http://localhost:3005)
+export function siteOrigin(req: NextRequest) {
+  const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || req.nextUrl.host;
+  const proto = req.headers.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
 export function fail(e: unknown, status = 500) {
   const message = e instanceof Error ? e.message : String(e);
   return NextResponse.json({ error: message }, { status });

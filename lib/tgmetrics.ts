@@ -148,7 +148,8 @@ export function tgSeries(rows: TgDaily[], from: string, to: string) {
     const r = by.get(date);
     return {
       date,
-      subscribers: tgSubsOn(rows, date),
+      // Только настоящие замеры: дни без данных график соединяет прямой, а не тянет старое значение
+      subscribers: r?.subscribers ?? null,
       // ключи как у Instagram, чтобы использовать тот же график подписок и отписок
       follows: r?.joined ?? null,
       unfollowsNeg: r?.left_count != null ? -r.left_count : null,

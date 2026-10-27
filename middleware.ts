@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE, authToken } from "@/lib/auth";
 
-// Защита паролем на весь сайт, кроме страницы логина, API логина
-// и cron-эндпоинтов (у них своя защита секретом).
+// Защита паролем на весь сайт, кроме страницы логина, API логина,
+// политики конфиденциальности (её требует Google) и cron-эндпоинтов (у них своя защита секретом).
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (
     pathname.startsWith("/login") ||
+    pathname === "/privacy" ||
     pathname.startsWith("/api/login") ||
     pathname.startsWith("/api/cron")
   ) {

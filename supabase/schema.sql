@@ -288,3 +288,122 @@ alter table tg_channel_daily enable row level security;
 alter table tg_posts enable row level security;
 alter table tg_post_snapshots enable row level security;
 alter table tg_channel_stats enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- YouTube (версия 2.2)
+-- ---------------------------------------------------------------------------
+
+create table if not exists yt_channels (
+  id text primary key,              -- ID канала YouTube (UC…)
+  handle text,                      -- @handle без @
+  title text not null,
+  description text,
+  avatar_url text,
+  uploads_playlist text,            -- плейлист со всеми видео канала
+  published_at timestamptz,         -- дата создания канала
+  is_own boolean not null default false,
+  is_active boolean not null default true,
+  subscribers bigint,
+  views_total bigint,
+  videos_total bigint,
+  analytics_linked boolean not null default false, -- вход Google выполнен, есть аналитика YouTube Studio
+  history_loaded boolean not null default false,
+  reporting_job text,               -- задание YouTube Reporting API (показы и CTR обложек)
+  created_at timestamptz default now(),
+  updated_at timestamptz
+);
+
+-- Токены входа Google для своих каналов. Хранятся зашифрованными,
+-- ключ берётся из GOOGLE_CLIENT_SECRET и в базе не лежит.
+create table if not exists yt_oauth (
+  channel_id text primary key references yt_channels(id) on delete cascade,
+  refresh_token text not null,
+  updated_at timestamptz default now()
+);
+
+-- Канал по дням. Замеры сайта (подписчики, всего просмотров) и аналитика YouTube Studio.
+-- Сутки аналитики YouTube считает по тихоокеанскому времени.
+create table if not exists yt_channel_daily (
+  channel_id text not null references yt_channels(id) on delete cascade,
+  date date not null,
+  subscribers bigint,
+  subscribers_source text,          -- snapshot (замер) | calc (по подпискам и отпискам из аналитики)
+  views_total bigint,
+  videos_total bigint,
+  views bigint,                     -- просмотры за день
+  watch_minutes bigint,             -- время просмотра за день, минуты
+  avg_view_duration numeric,        -- средняя длительность просмотра, секунды
+  avg_view_percentage numeric,      -- средний процент досмотра
+  subs_gained bigint,
+  subs_lost bigint,
+  likes bigint,
+  comments bigint,
+  shares bigint,
+  impressions bigint,               -- показы обложек (Reporting API)
+  impressions_ctr numeric,          -- CTR обложек, %
+  updated_at timestamptz default now(),
+  primary key (channel_id, date)
+);
+
+create table if not exists yt_videos (
+  id text primary key,              -- ID видео
+  channel_id text not null references yt_channels(id) on delete cascade,
+  published_at timestamptz not null,
+  title text,
+  description text,
+  duration_sec int,
+  is_short boolean,
+  thumb_url text,
+  views bigint,
+  likes bigint,
+  comments bigint,
+  views_24h bigint,                 -- просмотры через сутки после выхода (по замерам сайта)
+  views_7d bigint,                  -- через неделю
+  watch_minutes bigint,             -- аналитика своего канала за всё время
+  avg_view_duration numeric,
+  avg_view_percentage numeric,
+  subs_gained bigint,
+  shares bigint,
+  analytics_updated_at timestamptz,
+  updated_at timestamptz default now()
+);
+alter table yt_videos add column if not exists impressions bigint;      -- показы обложки за всё время отчётов
+alter table yt_videos add column if not exists impressions_ctr numeric; -- CTR обложки, %
+create index if not exists idx_yt_videos_channel on yt_videos(channel_id, published_at desc);
+
+create table if not exists yt_video_snapshots (
+  video_id text not null,
+  captured_at timestamptz not null default now(),
+  views bigint,
+  likes bigint,
+  comments bigint,
+  primary key (video_id, captured_at)
+);
+
+-- Показы и CTR обложек по видео и дням (YouTube Reporting API, отчёт channel_reach_basic_a1)
+create table if not exists yt_reach (
+  channel_id text not null references yt_channels(id) on delete cascade,
+  video_id text not null,
+  date date not null,
+  impressions bigint,
+  ctr numeric,
+  primary key (video_id, date)
+);
+create index if not exists idx_yt_reach_channel on yt_reach(channel_id, date);
+
+-- Разбивки аналитики своего канала за 28 дней: источники трафика, пол и возраст,
+-- страны, устройства, подписчики и не подписчики, Shorts и длинные видео
+create table if not exists yt_channel_stats (
+  channel_id text not null references yt_channels(id) on delete cascade,
+  date date not null,
+  data jsonb,
+  primary key (channel_id, date)
+);
+
+alter table yt_channels enable row level security;
+alter table yt_oauth enable row level security;
+alter table yt_channel_daily enable row level security;
+alter table yt_videos enable row level security;
+alter table yt_video_snapshots enable row level security;
+alter table yt_reach enable row level security;
+alter table yt_channel_stats enable row level security;

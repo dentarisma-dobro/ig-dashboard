@@ -2,7 +2,7 @@
 
 import type { Ctx } from "@/app/dashboard/page";
 import type { AudienceRow } from "@/lib/types";
-import { fmtDate } from "@/lib/format";
+import { countryName, fmtDate } from "@/lib/format";
 import { topEntries } from "@/lib/metrics";
 import { useApi } from "../useApi";
 import { Card, CardHeader, Empty, ErrorNote } from "../ui";
@@ -10,16 +10,6 @@ import { BarList } from "../charts";
 
 const GENDER: Record<string, string> = { F: "Женщины", M: "Мужчины", U: "Не указан" };
 const AGE_ORDER = ["13-17", "18-24", "25-34", "35-44", "45-54", "55-64", "65+"];
-
-let regionNames: Intl.DisplayNames | null = null;
-function countryName(code: string) {
-  try {
-    regionNames ||= new Intl.DisplayNames(["ru"], { type: "region" });
-    return regionNames.of(code) || code;
-  } catch {
-    return code;
-  }
-}
 
 export function audienceLists(a: AudienceRow) {
   return {

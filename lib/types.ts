@@ -170,6 +170,78 @@ export type TgStatsSummary = {
   topHours: TgGraph | null;
 };
 
+// ---------------------------------------------------------------------------
+// YouTube
+// ---------------------------------------------------------------------------
+
+export type YtChannel = {
+  id: string;
+  handle: string | null;
+  title: string;
+  description: string | null;
+  avatar_url: string | null;
+  is_own: boolean;
+  is_active: boolean;
+  subscribers: number | null;
+  views_total: number | null;
+  videos_total: number | null;
+  analytics_linked: boolean;
+  history_loaded: boolean;
+  updated_at: string | null;
+};
+
+export type YtDaily = {
+  channel_id: string;
+  date: string;
+  subscribers: number | null;
+  subscribers_source: string | null;
+  views_total: number | null;
+  videos_total: number | null;
+  views: number | null;
+  watch_minutes: number | null;
+  avg_view_duration: number | null;
+  avg_view_percentage: number | null;
+  subs_gained: number | null;
+  subs_lost: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  impressions: number | null;
+  impressions_ctr: number | null;
+};
+
+export type YtVideo = {
+  id: string;
+  channel_id: string;
+  published_at: string;
+  title: string | null;
+  duration_sec: number | null;
+  is_short: boolean | null;
+  thumb_url: string | null;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  views_24h: number | null;
+  views_7d: number | null;
+  watch_minutes: number | null;
+  avg_view_duration: number | null;
+  avg_view_percentage: number | null;
+  subs_gained: number | null;
+  shares: number | null;
+  impressions: number | null;
+  impressions_ctr: number | null;
+};
+
+export type YtStatsSummary = {
+  period: { from: string; to: string };
+  traffic: { name: string; views: number; minutes: number }[];
+  ageGender: { age: string; gender: string; percent: number }[];
+  countries: { code: string; views: number; minutes: number }[];
+  devices: { name: string; views: number }[];
+  subscribed: { name: string; views: number; minutes: number }[];
+  content: { name: string; views: number; minutes: number }[];
+};
+
 export type TgSession = {
   configured: boolean;
   connected: boolean;

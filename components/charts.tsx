@@ -356,11 +356,13 @@ export function BarList({
   format = (v) => fmtNum(v),
   total,
   color = SERIES[0],
+  share = true,
 }: {
   items: { label: string; value: number; extra?: string }[];
   format?: (v: number) => string;
   total?: number;
   color?: string;
+  share?: boolean; // показывать долю от суммы рядом со значением
 }) {
   const max = Math.max(...items.map((i) => i.value), 1);
   const sum = total ?? items.reduce((a, i) => a + i.value, 0);
@@ -372,7 +374,7 @@ export function BarList({
             <span className="text-ink truncate">{i.label}</span>
             <span className="text-sub tabular whitespace-nowrap">
               {format(i.value)}
-              {sum > 0 && <span className="text-muted"> · {fmtNum((i.value / sum) * 100, 1)}%</span>}
+              {share && sum > 0 && <span className="text-muted"> · {fmtNum((i.value / sum) * 100, 1)}%</span>}
               {i.extra && <span className="text-muted"> · {i.extra}</span>}
             </span>
           </div>

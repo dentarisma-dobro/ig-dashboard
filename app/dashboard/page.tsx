@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import type { Account, SyncRun, TgChannel, TgSession } from "@/lib/types";
+import type { Account, SyncRun, TgChannel, TgSession, YtChannel } from "@/lib/types";
 import { resolvePeriod } from "@/lib/period";
 import { dateInTz, lastCompleteMetaDay, LOCAL_TZ } from "@/lib/dates";
 import { useApi } from "@/components/useApi";
@@ -20,8 +20,12 @@ import { SettingsView } from "@/components/views/SettingsView";
 import { TgOverviewView } from "@/components/views/TgOverviewView";
 import { TgPostsView } from "@/components/views/TgPostsView";
 import { TgCompareView } from "@/components/views/TgCompareView";
+import { YtOverviewView } from "@/components/views/YtOverviewView";
+import { YtVideosView } from "@/components/views/YtVideosView";
+import { YtCompareView } from "@/components/views/YtCompareView";
 import { ReportDialog } from "@/components/ReportDialog";
 import { PostModal } from "@/components/PostModal";
+import { YtVideoModal } from "@/components/YtVideoModal";
 
 export type Ctx = {
   accounts: Account[];
@@ -29,14 +33,20 @@ export type Ctx = {
   accountId: string;
   tgChannels: TgChannel[];
   tgChannel: TgChannel | null; // выбранный Telegram-канал
+  ytChannels: YtChannel[];
+  ytChannel: YtChannel | null; // выбранный YouTube-канал
   from: string;
   to: string;
   colorFor: (id: string) => string;
   tgColorFor: (id: string) => string;
+  ytColorFor: (id: string) => string;
   openPost: (id: string) => void;
   reloadAccounts: () => void;
   reloadTg: () => void;
+  reloadYt: () => void;
 };
+
+export type Source = "ig" | "tg" | "yt";
 
 const TITLES: Record<View, string> = {
   overview: "Обзор",
@@ -47,42 +57,57 @@ const TITLES: Record<View, string> = {
   settings: "Настройки",
 };
 
+function paletteFor(list: { id: string }[]) {
+  return (id: string) => {
+    const i = list.findIndex((c) => c.id === id);
+    return i >= 0 && i < SERIES.length ? SERIES[i] : "#8a929e";
+  };
+}
+
 function Dashboard() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const accountsQ = useApi<{ accounts: Account[]; lastRun: SyncRun | null }>("/api/accounts");
   const tgQ = useApi<{ channels: TgChannel[]; session: TgSession }>("/api/tg/channels");
+  const ytQ = useApi<{ channels: YtChannel[]; status: { apiKey: boolean; oauth: boolean } }>("/api/yt/channels");
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [postId, setPostId] = useState<string | null>(null);
+  const [videoId, setVideoId] = useState<string | null>(null);
 
   const allAccounts = accountsQ.data?.accounts || [];
   const accounts = useMemo(() => allAccounts.filter((a) => a.is_active !== false), [allAccounts]);
   const allTg = tgQ.data?.channels || [];
   const tgChannels = useMemo(() => allTg.filter((c) => c.is_active), [allTg]);
+  const allYt = ytQ.data?.channels || [];
+  const ytChannels = useMemo(() => allYt.filter((c) => c.is_active), [allYt]);
 
-  // Что выбрано в меню: аккаунт Instagram, "all", "tg:all" или "tg:<id канала>"
+  // Что выбрано в меню: аккаунт Instagram или "all", "tg:<id>" или "tg:all", "yt:<id>" или "yt:all"
   const sel = params.get("a");
-  let selection: string;
-  if (sel === "all" || sel === "tg:all" || accounts.some((a) => a.id === sel) || tgChannels.some((c) => `tg:${c.id}` === sel)) {
-    selection = sel as string;
-  } else {
-    selection = accounts[0]?.id || (tgChannels[0] ? `tg:${tgChannels[0].id}` : "all");
-  }
-  const isTg = selection.startsWith("tg:");
-  const account = isTg ? null : accounts.find((a) => a.id === selection) || null;
-  const tgChannel = isTg ? tgChannels.find((c) => `tg:${c.id}` === selection) || null : null;
-  const single = isTg ? !!tgChannel : !!account;
+  const valid =
+    sel === "all" ||
+    sel === "tg:all" ||
+    sel === "yt:all" ||
+    accounts.some((a) => a.id === sel) ||
+    tgChannels.some((c) => `tg:${c.id}` === sel) ||
+    ytChannels.some((c) => `yt:${c.id}` === sel);
+  const selection = valid ? (sel as string) : accounts[0]?.id || (tgChannels[0] ? `tg:${tgChannels[0].id}` : "all");
+  const source: Source = selection.startsWith("tg:") ? "tg" : selection.startsWith("yt:") ? "yt" : "ig";
+  const account = source === "ig" ? accounts.find((a) => a.id === selection) || null : null;
+  const tgChannel = source === "tg" ? tgChannels.find((c) => `tg:${c.id}` === selection) || null : null;
+  const ytChannel = source === "yt" ? ytChannels.find((c) => `yt:${c.id}` === selection) || null : null;
+  const single = !!(account || tgChannel || ytChannel);
 
   let view = (params.get("v") as View) || (single ? "overview" : "compare");
   if (view !== "settings") {
     if (!single && (view === "overview" || view === "audience")) view = "compare";
     if (single && view === "compare") view = "overview";
-    if (isTg && (view === "stories" || view === "audience")) view = single ? "overview" : "compare";
+    if (source !== "ig" && (view === "stories" || view === "audience")) view = single ? "overview" : "compare";
   }
 
-  const lastDay = isTg ? dateInTz(new Date(), LOCAL_TZ) : lastCompleteMetaDay();
+  // Instagram отдаёт сутки после их завершения, Telegram и YouTube показываем по сегодняшний день
+  const lastDay = source === "ig" ? lastCompleteMetaDay() : dateInTz(new Date(), LOCAL_TZ);
   const period = resolvePeriod(params.get("p"), params.get("from"), params.get("to"), lastDay);
 
   const update = useCallback(
@@ -98,39 +123,34 @@ function Dashboard() {
         q.delete("from");
         q.delete("to");
       }
+      q.delete("yt");
+      q.delete("msg");
       router.replace(`${pathname}?${q.toString()}`, { scroll: false });
     },
     [params, pathname, router]
   );
 
-  const colorFor = useCallback(
-    (id: string) => {
-      const i = allAccounts.findIndex((a) => a.id === id);
-      return i >= 0 && i < SERIES.length ? SERIES[i] : "#8a929e";
-    },
-    [allAccounts]
-  );
-  const tgColorFor = useCallback(
-    (id: string) => {
-      const i = allTg.findIndex((c) => c.id === id);
-      return i >= 0 && i < SERIES.length ? SERIES[i] : "#8a929e";
-    },
-    [allTg]
-  );
+  const colorFor = useMemo(() => paletteFor(allAccounts), [allAccounts]);
+  const tgColorFor = useMemo(() => paletteFor(allTg), [allTg]);
+  const ytColorFor = useMemo(() => paletteFor(allYt), [allYt]);
 
   const ctx: Ctx = {
     accounts,
     account,
-    accountId: isTg ? "all" : selection,
+    accountId: source === "ig" ? selection : "all",
     tgChannels,
     tgChannel,
+    ytChannels,
+    ytChannel,
     from: period.from,
     to: period.to,
     colorFor,
     tgColorFor,
+    ytColorFor,
     openPost: setPostId,
     reloadAccounts: accountsQ.reload,
     reloadTg: tgQ.reload,
+    reloadYt: ytQ.reload,
   };
 
   if (accountsQ.error && !accountsQ.data) {
@@ -149,53 +169,68 @@ function Dashboard() {
     );
   }
 
-  const subtitle = isTg
-    ? tgChannel
-      ? `Telegram · ${tgChannel.title}${tgChannel.username ? ` · @${tgChannel.username}` : ""}`
-      : `Telegram · все каналы · ${tgChannels.length}`
-    : account
-      ? `${account.display_name} · @${account.username}`
-      : `Instagram · все аккаунты · ${accounts.length}`;
+  const subtitle =
+    source === "tg"
+      ? tgChannel
+        ? `Telegram · ${tgChannel.title}${tgChannel.username ? ` · @${tgChannel.username}` : ""}`
+        : `Telegram · все каналы · ${tgChannels.length}`
+      : source === "yt"
+        ? ytChannel
+          ? `YouTube · ${ytChannel.title}${ytChannel.handle ? ` · @${ytChannel.handle}` : ""}`
+          : `YouTube · все каналы · ${ytChannels.length}`
+        : account
+          ? `${account.display_name} · @${account.username}`
+          : `Instagram · все аккаунты · ${accounts.length}`;
 
   const openSettings = () => update({ v: "settings" });
+  const emptySource = (name: string) => (
+    <div className="rounded-xl border border-line bg-card p-6 text-sm text-sub">
+      {name} не подключены. Добавьте их в разделе{" "}
+      <button className="text-accent underline" onClick={openSettings}>
+        «Настройки»
+      </button>
+      .
+    </div>
+  );
+
   let content: React.ReactNode;
   if (view === "settings") {
-    content = <SettingsView ctx={ctx} allAccounts={allAccounts} tgChannels={allTg} tgSession={tgQ.data?.session || null} />;
-  } else if (isTg) {
-    if (tgChannels.length === 0) {
-      content = (
-        <div className="rounded-xl border border-line bg-card p-6 text-sm text-sub">
-          Telegram-каналы не подключены. Добавьте их в разделе{" "}
-          <button className="text-accent underline" onClick={openSettings}>
-            «Настройки»
-          </button>
-          .
-        </div>
-      );
-    } else if (view === "posts") content = <TgPostsView ctx={ctx} />;
+    content = (
+      <SettingsView
+        ctx={ctx}
+        allAccounts={allAccounts}
+        tgChannels={allTg}
+        tgSession={tgQ.data?.session || null}
+        ytChannels={allYt}
+        ytStatus={ytQ.data?.status || null}
+      />
+    );
+  } else if (source === "tg") {
+    if (tgChannels.length === 0) content = emptySource("Telegram-каналы");
+    else if (view === "posts") content = <TgPostsView ctx={ctx} />;
     else if (tgChannel) content = <TgOverviewView ctx={ctx} onOpenSettings={openSettings} />;
     else content = <TgCompareView ctx={ctx} onOpenChannel={(id) => update({ a: `tg:${id}`, v: "overview" })} />;
+  } else if (source === "yt") {
+    if (ytChannels.length === 0) content = emptySource("YouTube-каналы");
+    else if (view === "posts") content = <YtVideosView ctx={ctx} onOpenVideo={setVideoId} />;
+    else if (ytChannel) content = <YtOverviewView ctx={ctx} onOpenVideo={setVideoId} onOpenSettings={openSettings} />;
+    else content = <YtCompareView ctx={ctx} onOpenChannel={(id) => update({ a: `yt:${id}`, v: "overview" })} />;
   } else if (accounts.length === 0) {
-    content = (
-      <div className="rounded-xl border border-line bg-card p-6 text-sm text-sub">
-        Нет отслеживаемых аккаунтов. Подключите их в разделе{" "}
-        <button className="text-accent underline" onClick={openSettings}>
-          «Настройки»
-        </button>
-        .
-      </div>
-    );
+    content = emptySource("Аккаунты Instagram");
   } else if (view === "overview") content = <OverviewView ctx={ctx} />;
   else if (view === "posts") content = <PostsView ctx={ctx} />;
   else if (view === "stories") content = <StoriesView ctx={ctx} onOpenSettings={openSettings} />;
   else if (view === "audience") content = <AudienceView ctx={ctx} />;
   else content = <CompareView ctx={ctx} onOpenAccount={(id) => update({ a: id, v: "overview" })} />;
 
+  const title = view === "posts" && source === "tg" ? "Посты" : view === "posts" && source === "yt" ? "Видео" : TITLES[view];
+
   return (
     <div className="min-h-screen lg:pl-[248px]">
       <Sidebar
         accounts={accounts}
         tgChannels={tgChannels}
+        ytChannels={ytChannels}
         selection={selection}
         view={view}
         lastRun={accountsQ.data.lastRun}
@@ -210,20 +245,12 @@ function Dashboard() {
             <IconMenu width={22} height={22} />
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-lg font-semibold text-ink">
-              {view === "posts" && isTg ? "Посты" : TITLES[view]}
-            </h1>
+            <h1 className="truncate text-lg font-semibold text-ink">{title}</h1>
             <p className="truncate text-xs text-muted">{view === "settings" ? "Аккаунты, каналы и сбор статистики" : subtitle}</p>
           </div>
           {view !== "settings" && (
             <div className="flex w-full items-center gap-2 sm:w-auto">
-              <PeriodPicker
-                preset={period.preset}
-                from={period.from}
-                to={period.to}
-                max={lastDay}
-                onChange={({ p, from, to }) => update({ p, from, to })}
-              />
+              <PeriodPicker preset={period.preset} from={period.from} to={period.to} max={lastDay} onChange={({ p, from, to }) => update({ p, from, to })} />
               <Button variant="primary" onClick={() => setReportOpen(true)}>
                 <IconDownload width={16} height={16} />
                 <span className="hidden sm:inline">Отчёт</span>
@@ -240,11 +267,13 @@ function Dashboard() {
         onClose={() => setReportOpen(false)}
         accounts={accounts}
         tgChannels={tgChannels}
+        ytChannels={ytChannels}
         defaultSelection={selection}
         from={period.from}
         to={period.to}
       />
       <PostModal postId={postId} onClose={() => setPostId(null)} ctx={ctx} />
+      <YtVideoModal videoId={videoId} onClose={() => setVideoId(null)} />
     </div>
   );
 }

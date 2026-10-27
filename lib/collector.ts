@@ -11,6 +11,7 @@ import { mapPool } from "./pool";
 import { addDays, dateRange, diffDays, lastCompleteMetaDay, todayUtc } from "./dates";
 import { storeImage } from "./storage";
 import { runTelegramSync } from "./tgcollector";
+import { runYoutubeSync } from "./ytcollector";
 
 export type AccountRow = {
   id: string;
@@ -463,20 +464,22 @@ export async function runScheduledSync(source: "cron" | "manual"): Promise<{ ok:
     }
   })();
   const telegram = runTelegramSync(true).catch((e) => ({ ok: false, log: [`Telegram: ОШИБКА: ${e?.message || e}`] }));
-  const [igOk, tgResult] = await Promise.all([instagram, telegram]);
-  log.push(...tgResult.log);
-  ok = igOk && tgResult.ok;
+  const youtube = runYoutubeSync(true).catch((e) => ({ ok: false, log: [`YouTube: ОШИБКА: ${e?.message || e}`] }));
+  const [igOk, tgResult, ytResult] = await Promise.all([instagram, telegram, youtube]);
+  log.push(...tgResult.log, ...ytResult.log);
+  ok = igOk && tgResult.ok && ytResult.ok;
   await finishRun(runId, ok, log);
   return { ok, log };
 }
 
 // Промежуточный сбор (/api/cron/stories, три раза в сутки): Stories Instagram, которые живут 24 часа,
-// и свежие посты Telegram, чтобы посчитать их охват за первые сутки
+// свежие посты Telegram и видео YouTube, чтобы посчитать их охват за первые сутки
 export async function runStoriesSync(): Promise<{ ok: boolean; log: string[] }> {
   const log: string[] = [];
   let ok = true;
   const accounts = await getAccounts();
   const telegram = runTelegramSync(false).catch((e) => ({ ok: false, log: [`Telegram: ОШИБКА: ${e?.message || e}`] }));
+  const youtube = runYoutubeSync(false).catch((e) => ({ ok: false, log: [`YouTube: ОШИБКА: ${e?.message || e}`] }));
   await mapPool(accounts, 3, async (a) => {
     try {
       const r = await syncStories(a);
@@ -486,7 +489,7 @@ export async function runStoriesSync(): Promise<{ ok: boolean; log: string[] }> 
       log.push(`@${a.username}: ОШИБКА: ${e?.message || e}`);
     }
   });
-  const tgResult = await telegram;
-  log.push(...tgResult.log);
-  return { ok: ok && tgResult.ok, log };
+  const [tgResult, ytResult] = await Promise.all([telegram, youtube]);
+  log.push(...tgResult.log, ...ytResult.log);
+  return { ok: ok && tgResult.ok && ytResult.ok, log };
 }

@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import type { Ctx } from "@/app/dashboard/page";
-import type { Account, SyncRun, TgChannel, TgSession } from "@/lib/types";
+import type { Account, SyncRun, TgChannel, TgSession, YtChannel } from "@/lib/types";
 import { TelegramSettings } from "./TelegramSettings";
+import { YouTubeSettings } from "./YouTubeSettings";
 import { fmtAgo, fmtCompact, fmtDateTime } from "@/lib/format";
 import { getJson, postJson, useApi } from "../useApi";
 import { Avatar, Button, Card, CardHeader, Spinner, cx } from "../ui";
@@ -16,11 +17,15 @@ export function SettingsView({
   allAccounts,
   tgChannels,
   tgSession,
+  ytChannels,
+  ytStatus,
 }: {
   ctx: Ctx;
   allAccounts: Account[];
   tgChannels: TgChannel[];
   tgSession: TgSession | null;
+  ytChannels: YtChannel[];
+  ytStatus: { apiKey: boolean; oauth: boolean } | null;
 }) {
   const runs = useApi<{ runs: SyncRun[] }>("/api/sync");
   const [busy, setBusy] = useState<string | null>(null);
@@ -236,6 +241,8 @@ export function SettingsView({
       </Card>
 
       <TelegramSettings session={tgSession} channels={tgChannels} onChanged={ctx.reloadTg} />
+
+      <YouTubeSettings status={ytStatus} channels={ytChannels} onChanged={ctx.reloadYt} />
 
       <Card className="xl:col-span-2">
         <CardHeader title="Что важно знать про данные Instagram" />

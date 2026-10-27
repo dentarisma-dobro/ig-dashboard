@@ -16,7 +16,7 @@ function localDateTime(iso: string) {
   return new Date(`${date}T${time}:00Z`);
 }
 
-const pct = (v: number | null) => (v == null ? null : v / 100);
+const pct = (v: number | null) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v) / 100);
 const round = (v: number | null) => (v == null ? null : Math.round(v));
 
 function header(ws: any) {
@@ -289,13 +289,146 @@ function addTelegram(wb: any, data: ReportData) {
   header(posts);
 }
 
+function addYoutube(wb: any, data: ReportData) {
+  const summary = wb.addWorksheet("YouTube сводка");
+  summary.columns = [
+    { header: "Канал", key: "title", width: 26 },
+    { header: "Handle", key: "handle", width: 20 },
+    { header: "Тип", key: "own", width: 11 },
+    { header: "Подписчики на конец периода", key: "subs", width: 14 },
+    { header: "Прирост", key: "delta", width: 10 },
+    { header: "Подписались", key: "gained", width: 12 },
+    { header: "Отписались", key: "lost", width: 12 },
+    { header: "Просмотры канала", key: "views", width: 13 },
+    { header: "Время просмотра, ч", key: "hours", width: 13 },
+    { header: "Средний просмотр, с", key: "avgDur", width: 13 },
+    { header: "Досмотр", key: "avgPct", width: 10, style: { numFmt: "0.0%" } },
+    { header: "Показы обложек", key: "imp", width: 13 },
+    { header: "CTR обложек", key: "ctr", width: 11, style: { numFmt: "0.00%" } },
+    { header: "Видео", key: "long", width: 8 },
+    { header: "Shorts", key: "shorts", width: 8 },
+    { header: "Средние просмотры видео", key: "videoViews", width: 14 },
+    { header: "За 24 часа", key: "v24", width: 11 },
+    { header: "За 7 дней", key: "v7", width: 11 },
+    { header: "ER", key: "er", width: 9, style: { numFmt: "0.00%" } },
+    { header: "View rate", key: "vr", width: 10, style: { numFmt: "0.0%" } },
+  ];
+  for (const r of data.yt) {
+    const c = r.cur;
+    summary.addRow({
+      title: r.channel.title,
+      handle: r.channel.handle ? "@" + r.channel.handle : "",
+      own: r.channel.is_own ? "свой" : "конкурент",
+      subs: c.subsEnd,
+      delta: c.subsDelta,
+      gained: c.subsGained,
+      lost: c.subsLost,
+      views: c.views ?? c.viewsByCounter,
+      hours: c.watchHours == null ? null : Math.round(c.watchHours),
+      avgDur: round(c.avgViewDuration),
+      avgPct: pct(c.avgViewPercentage),
+      imp: c.impressions,
+      ctr: pct(c.ctr),
+      long: c.long,
+      shorts: c.shorts,
+      videoViews: round(c.videoViewsAvg),
+      v24: round(c.views24Avg),
+      v7: round(c.views7dAvg),
+      er: pct(c.er),
+      vr: pct(c.viewRate),
+    });
+  }
+  header(summary);
+  summary.addRow([]);
+  summary.addRow([`Период: ${fmtRange(data.from, data.to)}`]);
+  summary.addRow(["ER = (лайки + комментарии) / просмотры; view rate = просмотры видео / подписчики. Подписки, время просмотра, досмотр и показы есть только у каналов с подключённой аналитикой"]);
+
+  const days = wb.addWorksheet("YouTube по дням");
+  days.columns = [
+    { header: "Канал", key: "title", width: 24 },
+    { header: "Дата", key: "date", width: 12, style: { numFmt: "dd.mm.yyyy" } },
+    { header: "Подписчики", key: "subs", width: 12 },
+    { header: "Подписались", key: "gained", width: 12 },
+    { header: "Отписались", key: "lost", width: 12 },
+    { header: "Просмотры", key: "views", width: 11 },
+    { header: "Время просмотра, ч", key: "hours", width: 13 },
+    { header: "Показы обложек", key: "imp", width: 13 },
+    { header: "CTR обложек", key: "ctr", width: 11, style: { numFmt: "0.00%" } },
+    { header: "Просмотры видео дня", key: "postViews", width: 15 },
+  ];
+  for (const r of data.yt) {
+    for (const d of r.days) {
+      days.addRow({
+        title: r.channel.title,
+        date: new Date(d.date + "T00:00:00Z"),
+        subs: d.subscribers,
+        gained: d.follows,
+        lost: d.unfollowsNeg != null ? -d.unfollowsNeg : null,
+        views: d.views,
+        hours: d.watchHours,
+        imp: d.impressions,
+        ctr: pct(d.ctr),
+        postViews: d.postViews,
+      });
+    }
+  }
+  header(days);
+
+  const videos = wb.addWorksheet("YouTube видео");
+  videos.columns = [
+    { header: "Канал", key: "title", width: 22 },
+    { header: "Дата и время (Мск)", key: "date", width: 17, style: { numFmt: "dd.mm.yyyy hh:mm" } },
+    { header: "Тип", key: "type", width: 8 },
+    { header: "Название", key: "name", width: 50 },
+    { header: "Длительность, с", key: "dur", width: 12 },
+    { header: "Просмотры", key: "views", width: 11 },
+    { header: "За 24 часа", key: "v24", width: 11 },
+    { header: "За 7 дней", key: "v7", width: 11 },
+    { header: "Лайки", key: "likes", width: 9 },
+    { header: "Комментарии", key: "comments", width: 12 },
+    { header: "ER", key: "er", width: 9, style: { numFmt: "0.00%" } },
+    { header: "Время просмотра, ч", key: "hours", width: 13 },
+    { header: "Средний просмотр, с", key: "avgDur", width: 13 },
+    { header: "Досмотр", key: "avgPct", width: 10, style: { numFmt: "0.0%" } },
+    { header: "Показы обложки", key: "imp", width: 13 },
+    { header: "CTR обложки", key: "ctr", width: 11, style: { numFmt: "0.00%" } },
+    { header: "Ссылка", key: "link", width: 40 },
+  ];
+  for (const r of data.yt) {
+    for (const v of r.videos) {
+      const link = v.is_short ? `https://www.youtube.com/shorts/${v.id}` : `https://www.youtube.com/watch?v=${v.id}`;
+      videos.addRow({
+        title: r.channel.title,
+        date: localDateTime(v.published_at),
+        type: v.is_short ? "Shorts" : "Видео",
+        name: v.title || "",
+        dur: v.duration_sec,
+        views: v.views,
+        v24: v.views_24h,
+        v7: v.views_7d,
+        likes: v.likes,
+        comments: v.comments,
+        er: pct(v.er),
+        hours: v.watch_minutes != null ? Math.round((Number(v.watch_minutes) / 60) * 10) / 10 : null,
+        avgDur: round(v.avg_view_duration != null ? Number(v.avg_view_duration) : null),
+        avgPct: pct(v.avg_view_percentage != null ? Number(v.avg_view_percentage) : null),
+        imp: v.impressions,
+        ctr: pct(v.impressions_ctr != null ? Number(v.impressions_ctr) : null),
+        link: { text: link, hyperlink: link },
+      });
+    }
+  }
+  header(videos);
+}
+
 export async function downloadExcelReport(data: ReportData) {
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Статистика Instagram и Telegram";
+  wb.creator = "Статистика Instagram, Telegram и YouTube";
   wb.created = new Date();
   if (data.accounts.length) addInstagram(wb, data);
   if (data.tg.length) addTelegram(wb, data);
+  if (data.yt.length) addYoutube(wb, data);
   const buffer = await wb.xlsx.writeBuffer();
   saveBlob(
     new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),

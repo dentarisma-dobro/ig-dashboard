@@ -32,6 +32,8 @@ Project Settings → Environment Variables. В README и в коде секре�
 | `SUPABASE_SERVICE_ROLE_KEY` | secret (service_role) ключ оттуда же |
 | `IG_ACCESS_TOKEN` | System User token из Meta Business Manager |
 | `TG_API_ID`, `TG_API_HASH` | ключи приложения Telegram с my.telegram.org (раздел «Telegram» ниже) |
+| `YT_API_KEY` | ключ YouTube Data API v3 (раздел «YouTube» ниже) |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth-клиент Google для аналитики своих YouTube-каналов |
 | `IG_GRAPH_VERSION` | необязательно, по умолчанию `v24.0` |
 | `NEXT_PUBLIC_TZ` | необязательно, часовой пояс публикаций, по умолчанию `Europe/Moscow` |
 
@@ -99,6 +101,46 @@ Project Settings → Environment Variables. В README и в коде секре�
   вышедших до подключения канала, его нет.
 - Подписки, отписки, источники и уведомления есть только у своих каналов, где аккаунт админ.
 
+## YouTube
+
+Два уровня данных:
+- **Публичные** (ключ `YT_API_KEY`): любые каналы, в том числе конкуренты. Подписчики и счётчик
+  просмотров канала по дням (история копится с подключения), все видео с просмотрами, лайками,
+  комментариями, длительностью, признаком Shorts, просмотрами за первые сутки и неделю.
+- **Аналитика своего канала** (вход Google-аккаунтом владельца): всё из YouTube Studio за всё время
+  канала: просмотры и время просмотра по дням, средняя длительность и процент досмотра, подписки
+  и отписки, метрики каждого видео, удержание аудитории, источники трафика, пол, возраст, страны,
+  устройства. Показы и CTR обложек приходят суточными отчётами YouTube Reporting API: первые
+  появятся через 1–2 суток после подключения.
+
+Настройка в Google Cloud Console (console.cloud.google.com, может понадобиться VPN):
+1. Создайте проект (например, `Stats dashboard`).
+2. APIs & Services → Library: включите YouTube Data API v3, YouTube Analytics API, YouTube Reporting API.
+3. APIs & Services → Credentials → Create credentials → API key. Это `YT_API_KEY`.
+4. Google Auth Platform (OAuth consent screen):
+   - Branding: название и почта;
+   - Audience: External, затем **Publish app**, статус должен стать **In production**
+     (иначе Google сбрасывает вход раз в 7 дней);
+   - Data Access: добавьте `youtube.readonly` и `yt-analytics.readonly`.
+5. Google Auth Platform → Clients → Create client → Web application. Authorized redirect URIs:
+   `https://ig-dashboard-theta.vercel.app/api/yt/oauth/callback` и
+   `http://localhost:3005/api/yt/oauth/callback`. Client ID и Client secret — это
+   `GOOGLE_CLIENT_ID` и `GOOGLE_CLIENT_SECRET`.
+6. Добавьте три значения на Vercel и в `.env.local`, пересоберите сайт.
+7. На сайте: «Настройки» → «YouTube-каналы» → «Подключить аналитику канала», войдите аккаунтом
+   владельца и выберите канал. Google покажет «приложение не проверено»: «Дополнительно → Перейти».
+   Затем нажмите у канала «История». Конкурентов добавляйте по ссылке.
+
+Токен входа Google хранится в базе зашифрованным, ключ берётся из `GOOGLE_CLIENT_SECRET`.
+Если его сменить, подключите аналитику заново.
+
+Что важно знать:
+- Публичное число подписчиков Google округляет до трёх значащих цифр (12 345 → 12 300).
+- Shorts YouTube в API не отмечает, сайт определяет их по странице youtube.com/shorts/ID.
+- Сутки аналитики YouTube считает по тихоокеанскому времени, последние 2–3 дня он дорабатывает.
+- Квота YouTube Data API бесплатная, 10 000 единиц в сутки. Сайт тратит примерно
+  2 единицы на каждые 50 видео в день.
+
 ## Обновление с версии 1.0
 
 База уже обновлена 18.10.2026 (выполнен `supabase/schema.sql`), история за 30 дней и все
@@ -153,6 +195,8 @@ npm run dev
 | `lib/collector.ts` | сбор статистики в базу, восстановление подписчиков, копирование обложек |
 | `lib/telegram.ts` | вход в аккаунт Telegram, каналы, посты, встроенная статистика |
 | `lib/tgpublic.ts` | режим без ключей: чтение публичных страниц t.me |
+| `lib/youtube.ts` | YouTube Data, Analytics и Reporting API, вход Google |
+| `lib/ytcollector.ts`, `lib/ytmetrics.ts` | сбор YouTube в базу и расчёт ER, view rate, досмотра |
 | `lib/tgcollector.ts`, `lib/tgmetrics.ts` | сбор Telegram в базу и расчёт ERR, ER, охвата за 24 часа |
 | `lib/dates.ts` | сутки Instagram и работа с датами |
 | `lib/metrics.ts` | ER, ERR, сводки, лучшее время для публикаций |

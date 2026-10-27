@@ -1,6 +1,7 @@
 // Данные для отчёта: собираются в браузере из тех же API, что и дашборд.
 
-import type { Account, AudienceRow, DailyRow, Post, Story, TgChannel, TgDaily, TgPost, TgStatsSummary } from "../types";
+import type { Account, AudienceRow, DailyRow, Post, Story, TgChannel, TgDaily, TgPost, TgStatsSummary, YtChannel, YtDaily, YtStatsSummary, YtVideo } from "../types";
+import { periodVideos, statsByType, summarizeYt, ytEr, ytSeries, type YtSummary, type YtTypeStats } from "../ytmetrics";
 import { periodPosts, summarizeTg, tgPostEr, tgPostErr, tgSeries, tgSubsOn, viewsByPublishDay, type TgSummaryCalc } from "../tgmetrics";
 import { addDays, diffDays } from "../dates";
 import {
@@ -64,6 +65,20 @@ export type TgReport = {
   summary: TgStatsSummary | null;
 };
 
+export type YtReportVideo = YtVideo & { er: number | null };
+
+export type YtReport = {
+  channel: YtChannel;
+  cur: YtSummary;
+  prev: YtSummary;
+  days: ReturnType<typeof ytSeries>;
+  analytics: boolean; // есть аналитика YouTube Studio
+  reach: boolean; // есть показы и CTR обложек
+  videos: YtReportVideo[]; // видео периода, новые сверху
+  types: YtTypeStats[];
+  summary: YtStatsSummary | null;
+};
+
 export type ReportData = {
   from: string;
   to: string;
@@ -72,7 +87,28 @@ export type ReportData = {
   generatedAt: string;
   accounts: AccountReport[];
   tg: TgReport[];
+  yt: YtReport[];
 };
+
+async function loadYt(channel: YtChannel, from: string, to: string, prevFrom: string, prevTo: string): Promise<YtReport> {
+  const q = `channel=${channel.id}&from=${from}&to=${to}`;
+  const [stats, vids] = await Promise.all([
+    get<{ rows: YtDaily[]; summary: { data: YtStatsSummary } | null }>(`/api/yt/stats?${q}`),
+    get<{ videos: YtVideo[] }>(`/api/yt/videos?${q}`),
+  ]);
+  const inPeriod = periodVideos(vids.videos, from, to);
+  return {
+    channel,
+    cur: summarizeYt(stats.rows, vids.videos, from, to, channel.subscribers),
+    prev: summarizeYt(stats.rows, vids.videos, prevFrom, prevTo, channel.subscribers),
+    days: ytSeries(stats.rows, vids.videos, from, to),
+    analytics: stats.rows.some((r) => r.views != null),
+    reach: stats.rows.some((r) => r.impressions != null),
+    videos: inPeriod.map((v) => ({ ...v, er: ytEr(v) })),
+    types: statsByType(inPeriod),
+    summary: stats.summary?.data ?? null,
+  };
+}
 
 async function loadTg(channel: TgChannel, from: string, to: string, prevFrom: string, prevTo: string): Promise<TgReport> {
   const q = `channel=${channel.id}&from=${from}&to=${to}`;
@@ -112,10 +148,17 @@ async function get<T>(url: string): Promise<T> {
   return body as T;
 }
 
-export async function loadReportData(accounts: Account[], tgChannels: TgChannel[], from: string, to: string): Promise<ReportData> {
+export async function loadReportData(
+  accounts: Account[],
+  tgChannels: TgChannel[],
+  ytChannels: YtChannel[],
+  from: string,
+  to: string
+): Promise<ReportData> {
   const prevTo = addDays(from, -1);
   const prevFrom = addDays(prevTo, -diffDays(from, to));
   const tgPart = Promise.all(tgChannels.map((c) => loadTg(c, from, to, prevFrom, prevTo)));
+  const ytPart = Promise.all(ytChannels.map((c) => loadYt(c, from, to, prevFrom, prevTo)));
   const parts = await Promise.all(
     accounts.map(async (account): Promise<AccountReport> => {
       const q = `account=${account.id}&from=${from}&to=${to}`;
@@ -165,5 +208,5 @@ export async function loadReportData(accounts: Account[], tgChannels: TgChannel[
       };
     })
   );
-  return { from, to, prevFrom, prevTo, generatedAt: new Date().toISOString(), accounts: parts, tg: await tgPart };
+  return { from, to, prevFrom, prevTo, generatedAt: new Date().toISOString(), accounts: parts, tg: await tgPart, yt: await ytPart };
 }

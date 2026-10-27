@@ -35,7 +35,7 @@ export default function LoginPage() {
           <LogoMark className="w-10 h-10" />
           <div>
             <h1 className="text-lg font-semibold text-ink leading-tight">Статистика</h1>
-            <p className="text-sub text-sm">Instagram-аналитика</p>
+            <p className="text-sub text-sm">Instagram, Telegram и YouTube</p>
           </div>
         </div>
         <label className="block text-sm text-sub mb-1.5" htmlFor="password">

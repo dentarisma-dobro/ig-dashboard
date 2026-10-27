@@ -2,8 +2,8 @@
 // поэтому кириллица отображается правильно. Графики векторные.
 
 import { Document, Font, Image, Line, Page, Path, Rect, StyleSheet, Svg, Text, View } from "@react-pdf/renderer";
-import type { AccountReport, DayPoint, ReportData, ReportPost, TgReport } from "./data";
-import { fmtAxis, fmtCompact, fmtDateTime, fmtDay, fmtDayLong, fmtNum, fmtPct, fmtRange, fmtSigned, pctChange } from "../format";
+import type { AccountReport, DayPoint, ReportData, ReportPost, TgReport, YtReport } from "./data";
+import { countryName, fmtAxis, fmtCompact, fmtDateTime, fmtDay, fmtDayLong, fmtNum, fmtPct, fmtRange, fmtSigned, pctChange } from "../format";
 import { KIND_LABEL, topEntries } from "../metrics";
 
 let fontsReady = false;
@@ -245,10 +245,14 @@ const T = ({ children, bold, color }: { children: React.ReactNode; bold?: boolea
 
 // В шрифте нет эмодзи: без этой чистки вместо них в PDF появляются случайные символы
 function plainText(text: string) {
-  return text
+  const clean = text
     .replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}️‍⃣]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
+  // Хештеги убираем: в отчёте они не нужны, а «#podcast» после русского текста движок PDF
+  // делит на два куска разных алфавитов и переносит строку посередине с дефисом («#-podcast»)
+  const noTags = clean.replace(/(^|\s)#[\p{L}\p{N}_]+/gu, "").replace(/\s+/g, " ").trim();
+  return noTags || clean;
 }
 
 function shortCaption(p: ReportPost) {
@@ -263,7 +267,7 @@ function shortCaption(p: ReportPost) {
 function Footer({ generatedAt }: { generatedAt: string }) {
   return (
     <View style={s.footer} fixed>
-      <Text>Статистика Instagram и Telegram · сформировано {fmtDateTime(generatedAt)}</Text>
+      <Text>Статистика Instagram, Telegram и YouTube · сформировано {fmtDateTime(generatedAt)}</Text>
       <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
     </View>
   );
@@ -767,7 +771,7 @@ function TgChannelPage({ r, data, avatar }: { r: TgReport; data: ReportData; ava
               </View>
             ))}
             <Text style={[s.note, { marginTop: 4 }]}>
-              за {r.summary.period.from} – {r.summary.period.to}
+              за {fmtRange(r.summary.period.from, r.summary.period.to)}
             </Text>
           </View>
           <View style={[s.card, { flex: 1 }]}>
@@ -792,6 +796,299 @@ function TgChannelPage({ r, data, avatar }: { r: TgReport; data: ReportData; ava
       <Text style={[s.note, { marginTop: 10 }]}>
         Сравнение с периодом {fmtRange(data.prevFrom, data.prevTo)}. Время постов по Москве.
         {channel.is_own ? "" : " История подписчиков конкурента копится с дня его добавления на сайт."}
+      </Text>
+      <Footer generatedAt={data.generatedAt} />
+    </Page>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// YouTube
+// ---------------------------------------------------------------------------
+
+function clock(sec: number | null | undefined) {
+  if (sec == null || !Number.isFinite(sec)) return "—";
+  const s = Math.round(sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${r}` : `${m}:${r}`;
+}
+
+function YtComparisonPage({ data }: { data: ReportData }) {
+  const w = CONTENT_W - 20;
+  return (
+    <Page size="A4" style={s.page}>
+      <Text style={{ fontSize: 7.5, color: C.muted, letterSpacing: 0.4 }}>ОТЧЁТ ПО YOUTUBE</Text>
+      <Text style={s.h1}>Сравнение каналов</Text>
+      <Text style={{ color: C.sub, marginTop: 2, marginBottom: 12 }}>
+        {fmtRange(data.from, data.to)} · сравнение с периодом {fmtRange(data.prevFrom, data.prevTo)}
+      </Text>
+      <View style={s.card}>
+        <Table
+          rows={data.yt}
+          cols={[
+            {
+              title: "Канал",
+              width: w * 0.26,
+              render: (r) => (
+                <View style={[s.row, { alignItems: "center" }]}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, marginRight: 5, backgroundColor: C.series[data.yt.indexOf(r) % C.series.length] }} />
+                  <View>
+                    <Text style={{ fontWeight: 600 }}>{plainText(r.channel.title)}</Text>
+                    <Text style={{ fontSize: 7, color: C.muted }}>
+                      {r.channel.is_own ? "свой" : "конкурент"}
+                      {r.channel.handle ? ` · @${r.channel.handle}` : ""}
+                    </Text>
+                  </View>
+                </View>
+              ),
+            },
+            { title: "Подписчики", width: w * 0.11, align: "right", render: (r) => <T>{fmtNum(r.cur.subsEnd)}</T> },
+            {
+              title: "Прирост",
+              width: w * 0.09,
+              align: "right",
+              render: (r) => <T color={(r.cur.subsDelta || 0) > 0 ? C.up : (r.cur.subsDelta || 0) < 0 ? C.down : undefined}>{fmtSigned(r.cur.subsDelta)}</T>,
+            },
+            { title: "Просмотры", width: w * 0.11, align: "right", render: (r) => <T>{fmtCompact(r.cur.views ?? r.cur.viewsByCounter)}</T> },
+            { title: "Видео", width: w * 0.1, align: "right", render: (r) => <T>{`${r.cur.long}+${r.cur.shorts}`}</T> },
+            { title: "Ср. просм.", width: w * 0.1, align: "right", render: (r) => <T>{fmtNum(r.cur.videoViewsAvg)}</T> },
+            { title: "ER", width: w * 0.11, align: "right", render: (r) => <T>{fmtPct(r.cur.er, 2)}</T> },
+            { title: "View rate", width: w * 0.12, align: "right", render: (r) => <T>{fmtPct(r.cur.viewRate, 1)}</T> },
+          ]}
+        />
+      </View>
+      <Text style={[s.note, { marginTop: 8 }]}>
+        Видео: длинные + Shorts. ER = (лайки + комментарии) / просмотры; view rate = просмотры видео / подписчики. Средние по видео периода.
+      </Text>
+      <Footer generatedAt={data.generatedAt} />
+    </Page>
+  );
+}
+
+const GENDER_LABEL: Record<string, string> = { female: "Женщины", male: "Мужчины", user_specified: "Не указан" };
+
+// Строки «название — значение» группами с отступом между группами
+function BreakdownRows({ groups }: { groups: { label: string; value: string }[][] }) {
+  return (
+    <>
+      {groups
+        .filter((g) => g.length)
+        .map((g, gi) => (
+          <View key={gi} style={{ marginTop: gi ? 5 : 0 }}>
+            {g.map((x) => (
+              <View key={x.label} style={[s.row, { justifyContent: "space-between", paddingVertical: 2 }]}>
+                <Text style={{ fontSize: 8 }}>{x.label}</Text>
+                <Text style={{ fontSize: 8, color: C.sub }}>{x.value}</Text>
+              </View>
+            ))}
+          </View>
+        ))}
+    </>
+  );
+}
+
+function YtChannelPage({ r, data, images }: { r: YtReport; data: ReportData; images: Record<string, string | null> }) {
+  const { cur, prev, channel } = r;
+  const dates = r.days.map((d) => d.date);
+  const top = [...r.videos].sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 10);
+  const w = CONTENT_W - 20;
+  const avatar = images[`ytch:${channel.id}`];
+  const subsKnown = r.days.filter((d) => d.subscribers != null);
+  return (
+    <Page size="A4" style={s.page}>
+      <View style={[s.row, { alignItems: "center", marginBottom: 12 }]}>
+        {avatar ? (
+          <Image src={avatar} style={{ width: 44, height: 44, borderRadius: 22, marginRight: 12 }} />
+        ) : (
+          <View style={{ width: 44, height: 44, borderRadius: 22, marginRight: 12, backgroundColor: "#eaf2fc" }} />
+        )}
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 7.5, color: C.muted, letterSpacing: 0.4 }}>ОТЧЁТ ПО YOUTUBE · {channel.is_own ? "СВОЙ КАНАЛ" : "КОНКУРЕНТ"}</Text>
+          <Text style={s.h1}>{plainText(channel.title)}</Text>
+          <Text style={{ color: C.sub, marginTop: 1 }}>
+            {channel.handle ? `@${channel.handle} · ` : ""}
+            {fmtRange(data.from, data.to)}
+          </Text>
+        </View>
+        <View style={{ alignItems: "flex-end" }}>
+          <Text style={{ fontSize: 16, fontWeight: 600 }}>{fmtNum(cur.subsEnd ?? channel.subscribers)}</Text>
+          <Text style={s.note}>подписчиков</Text>
+        </View>
+      </View>
+
+      <View style={[s.row, { flexWrap: "wrap", marginRight: -6 }]}>
+        <Kpi label="Прирост подписчиков" value={fmtSigned(cur.subsDelta)}>
+          <Text style={s.note}>{cur.subsGained != null ? `+${fmtNum(cur.subsGained)} подписались, −${fmtNum(cur.subsLost)} отписались` : "по замерам сайта"}</Text>
+        </Kpi>
+        <Kpi label="Просмотры канала" value={fmtCompact(cur.views ?? cur.viewsByCounter)}>
+          {cur.views != null ? <DeltaText cur={cur.views} prev={prev.views} /> : <Text style={s.note}>по счётчику канала</Text>}
+        </Kpi>
+        {r.analytics && (
+          <Kpi label="Время просмотра" value={`${fmtNum(cur.watchHours, 0)} ч`}>
+            <DeltaText cur={cur.watchHours} prev={prev.watchHours} />
+          </Kpi>
+        )}
+        {r.analytics && (
+          <Kpi label="Средний просмотр" value={clock(cur.avgViewDuration)}>
+            <Text style={s.note}>досмотр {fmtPct(cur.avgViewPercentage, 1)}</Text>
+          </Kpi>
+        )}
+        {r.reach && (
+          <Kpi label="Показы обложек" value={fmtCompact(cur.impressions)}>
+            <Text style={s.note}>CTR {fmtPct(cur.ctr, 2)}</Text>
+          </Kpi>
+        )}
+        <Kpi label="Видео за период" value={fmtNum(cur.videos)}>
+          <Text style={s.note}>
+            {cur.long} видео, {cur.shorts} Shorts
+          </Text>
+        </Kpi>
+        <Kpi label="Средние просмотры видео" value={fmtNum(cur.videoViewsAvg)}>
+          <DeltaText cur={cur.videoViewsAvg} prev={prev.videoViewsAvg} />
+        </Kpi>
+        <Kpi label="За 24 часа / 7 дней" value={`${fmtNum(cur.views24Avg)} / ${fmtNum(cur.views7dAvg)}`}>
+          <Text style={s.note}>в среднем на видео</Text>
+        </Kpi>
+        <Kpi label="ER" value={fmtPct(cur.er, 2)}>
+          <DeltaText cur={cur.er} prev={prev.er} mode="pp" />
+        </Kpi>
+        <Kpi label="View rate" value={fmtPct(cur.viewRate, 1)}>
+          <DeltaText cur={cur.viewRate} prev={prev.viewRate} mode="pp" />
+        </Kpi>
+      </View>
+
+      <ChartBlock title="Подписчики" subtitle="Число подписчиков на конец дня">
+        {subsKnown.length < 2 ? (
+          <Text style={s.note}>История подписчиков копится со дня подключения канала, график появится со второго дня замеров.</Text>
+        ) : (
+          <PdfChart kind="line" values={r.days.map((d) => d.subscribers)} dates={dates} zero={false} />
+        )}
+      </ChartBlock>
+      {r.analytics ? (
+        <>
+          <ChartBlock title="Просмотры по дням" subtitle="По аналитике YouTube">
+            <PdfChart kind="bar" values={r.days.map((d) => d.views)} dates={dates} />
+          </ChartBlock>
+          <ChartBlock
+            title="Подписки и отписки"
+            subtitle="По аналитике YouTube"
+            legend={[
+              { label: "Подписались", color: C.blue },
+              { label: "Отписались", color: C.red },
+            ]}
+          >
+            <PdfChart kind="bar" values={r.days.map((d) => d.follows)} negative={r.days.map((d) => (d.unfollowsNeg != null ? -d.unfollowsNeg : null))} dates={dates} height={110} />
+          </ChartBlock>
+        </>
+      ) : (
+        <ChartBlock title="Просмотры видео по дню публикации" subtitle="Сумма текущих просмотров видео, вышедших в этот день">
+          <PdfChart kind="bar" values={r.days.map((d) => d.postViews)} dates={dates} />
+        </ChartBlock>
+      )}
+
+      {r.types.length > 0 && (
+        <View style={[s.section, s.card]} wrap={false}>
+          <Text style={[s.h2, { marginBottom: 6 }]}>Видео и Shorts</Text>
+          <Table
+            rows={r.types}
+            cols={[
+              { title: "Тип", width: w * 0.24, render: (t) => <T>{t.label}</T> },
+              { title: "Шт.", width: w * 0.12, align: "right", render: (t) => <T>{t.count}</T> },
+              { title: "Ср. просмотры", width: w * 0.16, align: "right", render: (t) => <T>{fmtNum(t.viewsAvg)}</T> },
+              { title: "Ср. ER", width: w * 0.16, align: "right", render: (t) => <T>{fmtPct(t.erAvg, 2)}</T> },
+              { title: "Ср. длина", width: w * 0.16, align: "right", render: (t) => <T>{clock(t.durationAvg)}</T> },
+              { title: "Досмотр", width: w * 0.16, align: "right", render: (t) => <T>{fmtPct(t.retentionAvg, 1)}</T> },
+            ]}
+          />
+        </View>
+      )}
+
+      <View style={[s.section, s.card]} wrap={top.length > 6} minPresenceAhead={120}>
+        <Text style={[s.h2, { marginBottom: 6 }]}>Лучшие видео по просмотрам</Text>
+        {top.length === 0 ? (
+          <Text style={s.note}>За период нет видео</Text>
+        ) : (
+          <Table
+            rows={top}
+            cols={[
+              {
+                title: "Видео",
+                width: w * 0.46,
+                render: (v) => (
+                  <View style={[s.row, { alignItems: "center" }]}>
+                    {images[`ytv:${v.id}`] ? (
+                      <Image src={images[`ytv:${v.id}`]!} style={{ width: 48, height: 27, borderRadius: 3, marginRight: 6 }} />
+                    ) : (
+                      <View style={{ width: 48, height: 27, borderRadius: 3, marginRight: 6, backgroundColor: C.soft }} />
+                    )}
+                    <View style={{ width: w * 0.46 - 58 }}>
+                      <Text style={{ fontSize: 7, color: C.muted }}>
+                        {v.is_short ? "Shorts" : "Видео"} · {fmtDateTime(v.published_at)} · {clock(v.duration_sec)}
+                      </Text>
+                      <Text style={{ fontSize: 7.5 }}>{tgCaption(v.title)}</Text>
+                    </View>
+                  </View>
+                ),
+              },
+              { title: "Просм.", width: w * 0.11, align: "right", render: (v) => <T bold>{fmtNum(v.views)}</T> },
+              { title: "7 дн", width: w * 0.09, align: "right", render: (v) => <T>{fmtNum(v.views_7d)}</T> },
+              { title: "Лайки", width: w * 0.09, align: "right", render: (v) => <T>{fmtNum(v.likes)}</T> },
+              { title: "Комм.", width: w * 0.08, align: "right", render: (v) => <T>{fmtNum(v.comments)}</T> },
+              { title: "ER", width: w * 0.08, align: "right", render: (v) => <T>{fmtPct(v.er, 1)}</T> },
+              { title: "Досм.", width: w * 0.09, align: "right", render: (v) => <T>{fmtPct(v.avg_view_percentage, 0)}</T> },
+            ]}
+          />
+        )}
+      </View>
+
+      {r.summary && r.summary.traffic.length > 0 && (
+        <View style={s.section} wrap={false}>
+          <View style={s.row}>
+            <View style={[s.card, { flex: 1, marginRight: 8 }]}>
+              <Text style={[s.h2, { marginBottom: 6 }]}>Источники трафика</Text>
+              <BreakdownRows
+                groups={[
+                  (() => {
+                    const total = r.summary!.traffic.reduce((a, b) => a + Number(b.views), 0) || 1;
+                    return r.summary!.traffic.slice(0, 7).map((t) => ({ label: t.name, value: fmtPct((Number(t.views) / total) * 100, 0) }));
+                  })(),
+                ]}
+              />
+            </View>
+            <View style={[s.card, { flex: 1, marginRight: 8 }]}>
+              <Text style={[s.h2, { marginBottom: 6 }]}>Аудитория</Text>
+              {r.summary.ageGender.length ? (
+                <BreakdownRows
+                  groups={(["gender", "age"] as const).map((key) =>
+                    Object.entries(r.summary!.ageGender.reduce<Record<string, number>>((a, x) => ({ ...a, [x[key]]: (a[x[key]] || 0) + Number(x.percent) }), {}))
+                      .sort((a, b) => a[0].localeCompare(b[0]))
+                      .map(([k, v]) => ({ label: GENDER_LABEL[k] || k, value: fmtPct(v, 1) }))
+                  )}
+                />
+              ) : (
+                <Text style={s.note}>YouTube не показывает пол и возраст, пока у канала мало просмотров</Text>
+              )}
+            </View>
+            <View style={[s.card, { flex: 1 }]}>
+              <Text style={[s.h2, { marginBottom: 6 }]}>Страны и устройства</Text>
+              <BreakdownRows
+                groups={[
+                  r.summary.countries.slice(0, 5).map((x) => ({ name: countryName(x.code), views: x.views })),
+                  r.summary.devices.slice(0, 3),
+                  r.summary.subscribed,
+                ].map((g) => g.map((x) => ({ label: x.name, value: `${fmtNum(x.views)} просм.` })))}
+              />
+            </View>
+          </View>
+          <Text style={[s.note, { marginTop: 4 }]}>Источники трафика, аудитория и страны за {fmtRange(r.summary.period.from, r.summary.period.to)}</Text>
+        </View>
+      )}
+
+      <Text style={[s.note, { marginTop: 10 }]}>
+        Сравнение с периодом {fmtRange(data.prevFrom, data.prevTo)}. Время публикаций по Москве, сутки аналитики YouTube по тихоокеанскому
+        времени. Публичное число подписчиков Google округляет до трёх значащих цифр.
       </Text>
       <Footer generatedAt={data.generatedAt} />
     </Page>
@@ -825,6 +1122,10 @@ export function ReportDocument({
       {data.tg.length > 1 && <TgComparisonPage data={data} />}
       {data.tg.map((r) => (
         <TgChannelPage key={r.channel.id} r={r} data={data} avatar={images[`tg:${r.channel.id}`]} />
+      ))}
+      {data.yt.length > 1 && <YtComparisonPage data={data} />}
+      {data.yt.map((r) => (
+        <YtChannelPage key={r.channel.id} r={r} data={data} images={images} />
       ))}
     </Document>
   );

@@ -103,6 +103,17 @@ export function fmtDuration(ms: number | null | undefined): string {
   return `${fmtNum(s / 3600, 1)} ч`;
 }
 
+// "RU" -> "Россия"
+let regionNames: Intl.DisplayNames | null = null;
+export function countryName(code: string): string {
+  try {
+    regionNames ||= new Intl.DisplayNames(["ru"], { type: "region" });
+    return regionNames.of(code) || code;
+  } catch {
+    return code;
+  }
+}
+
 export function plural(n: number, one: string, few: string, many: string): string {
   const a = Math.abs(n) % 100;
   const b = a % 10;
