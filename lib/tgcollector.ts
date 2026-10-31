@@ -239,10 +239,59 @@ function seriesByName(g: tg.Graph | null, re: RegExp): number[] | null {
   return key ? g.series[key] : null;
 }
 
+// Названия источников и языков в графиках Telegram приходят по-английски
+const GRAPH_NAMES: Record<string, string> = {
+  Followers: "Подписчики",
+  URL: "Ссылки",
+  Channels: "Другие каналы",
+  "Similar Channels": "Похожие каналы",
+  Groups: "Группы",
+  PM: "Личные сообщения",
+  Search: "Поиск",
+  Ads: "Реклама",
+  Stories: "Истории",
+  "Shareable Chat Folders": "Папки с чатами",
+  Other: "Другое",
+  Russian: "Русский",
+  English: "Английский",
+  Ukrainian: "Украинский",
+  Belarusian: "Белорусский",
+  Kazakh: "Казахский",
+  Uzbek: "Узбекский",
+  Kyrgyz: "Киргизский",
+  Tajik: "Таджикский",
+  Azerbaijani: "Азербайджанский",
+  Armenian: "Армянский",
+  Georgian: "Грузинский",
+  German: "Немецкий",
+  French: "Французский",
+  Spanish: "Испанский",
+  Italian: "Итальянский",
+  Portuguese: "Португальский",
+  Polish: "Польский",
+  Dutch: "Нидерландский",
+  Turkish: "Турецкий",
+  Arabic: "Арабский",
+  Persian: "Персидский",
+  Hebrew: "Иврит",
+  Hindi: "Хинди",
+  Indonesian: "Индонезийский",
+  Chinese: "Китайский",
+  Japanese: "Японский",
+  Korean: "Корейский",
+  Latvian: "Латышский",
+  Lithuanian: "Литовский",
+  Estonian: "Эстонский",
+  Romanian: "Румынский",
+};
+
 function graphTotals(g: tg.Graph | null): { name: string; value: number }[] {
   if (!g) return [];
   return Object.keys(g.series)
-    .map((k) => ({ name: g.names[k] || k, value: g.series[k].reduce((a, b) => a + (b || 0), 0) }))
+    .map((k) => {
+      const name = g.names[k] || k;
+      return { name: GRAPH_NAMES[name] || name, value: g.series[k].reduce((a, b) => a + (b || 0), 0) };
+    })
     .filter((r) => r.value > 0)
     .sort((a, b) => b.value - a.value);
 }

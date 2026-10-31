@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type { Ctx } from "@/app/dashboard/page";
 import type { TgDaily, TgPost, TgStatsSummary } from "@/lib/types";
 import { addDays, dateInTz, LOCAL_TZ } from "@/lib/dates";
-import { fmtCompact, fmtDateTime, fmtNum, fmtPct, fmtSigned, plural } from "@/lib/format";
+import { fmtCompact, fmtDateTime, fmtNum, fmtPct, fmtRange, fmtSigned, plural } from "@/lib/format";
 import {
   periodPosts,
   summarizeTg,
@@ -210,7 +210,7 @@ export function TgOverviewView({ ctx, onOpenSettings }: { ctx: Ctx; onOpenSettin
       {summary && (
         <div className="grid gap-5 lg:grid-cols-3">
           <Card>
-            <CardHeader title="Уведомления" subtitle={`Статистика Telegram за ${summary.period.from} – ${summary.period.to}`} />
+            <CardHeader title="Уведомления" subtitle={`Статистика Telegram за ${fmtRange(summary.period.from, summary.period.to)}`} />
             <div className="px-5 pb-5">
               <div className="text-2xl font-semibold text-ink">{fmtPct(summary.notificationsPercent, 1)}</div>
               <p className="text-xs text-muted">подписчиков не отключили уведомления</p>

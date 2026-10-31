@@ -246,6 +246,9 @@ export type TgSession = {
   configured: boolean;
   connected: boolean;
   pending: string | null;
+  codeVia?: string | null; // куда Telegram отправил код входа
+  codeNext?: string | null; // каким способом можно запросить код ещё раз
+  codePhone?: string | null; // номер, на который запрошен код, со скрытой серединой
   userName: string | null;
   phone: string | null;
 };

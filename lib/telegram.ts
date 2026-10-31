@@ -100,6 +100,7 @@ function friendly(e: any): Error {
     PHONE_NUMBER_INVALID: "Неверный номер телефона. Формат: +79991234567",
     PHONE_CODE_INVALID: "Неверный код",
     PHONE_CODE_EXPIRED: "Код устарел, запросите новый",
+    SEND_CODE_UNAVAILABLE: "Другие способы отправки кода закончились. Нажмите «Начать заново» и запросите код снова",
     PHONE_CODE_EMPTY: "Введите код",
     PASSWORD_HASH_INVALID: "Неверный облачный пароль",
     PHONE_NUMBER_BANNED: "Этот номер заблокирован в Telegram",
@@ -117,18 +118,21 @@ function friendly(e: any): Error {
 export async function sessionStatus() {
   if (!telegramConfigured()) return { configured: false, connected: false, pending: false, userName: null, phone: null };
   const row = await readRow();
-  let pendingStep: string | null = null;
+  let pending: { step?: string; via?: string; next?: string | null; phone?: string } = {};
   if (row?.pending) {
     try {
-      pendingStep = JSON.parse(decrypt(row.pending)).step;
+      pending = JSON.parse(decrypt(row.pending));
     } catch {
-      pendingStep = null;
+      pending = {};
     }
   }
   return {
     configured: true,
     connected: !!row?.data,
-    pending: pendingStep,
+    pending: pending.step ?? null,
+    codeVia: pending.step === "code" ? pending.via ?? null : null,
+    codeNext: pending.step === "code" ? pending.next ?? null : null,
+    codePhone: pending.phone ? maskPhone(pending.phone) : null,
     userName: row?.user_name ?? null,
     phone: row?.phone ?? null,
   };
@@ -138,21 +142,155 @@ function maskPhone(phone: string) {
   return phone.length > 6 ? `${phone.slice(0, 4)}•••${phone.slice(-2)}` : phone;
 }
 
-// Шаг 1: Telegram присылает код в приложение (или SMS)
+// Куда Telegram отправил код: способов много, и для входа в сторонние программы он часто выбирает не SMS
+function describeSentCode(t: Api.auth.TypeSentCodeType): string {
+  if (t instanceof Api.auth.SentCodeTypeApp) return "в приложение Telegram: откройте этот аккаунт и чат «Telegram» с синей галочкой";
+  if (t instanceof Api.auth.SentCodeTypeEmailCode) return `на почту ${t.emailPattern}, привязанную к аккаунту для входа`;
+  if (t instanceof Api.auth.SentCodeTypeSms || t instanceof Api.auth.SentCodeTypeFirebaseSms) return "по SMS на этот номер";
+  if (t instanceof Api.auth.SentCodeTypeSmsWord || t instanceof Api.auth.SentCodeTypeSmsPhrase) return "по SMS: кодом будет слово или фраза";
+  if (t instanceof Api.auth.SentCodeTypeCall) return "звонком: робот продиктует код";
+  if (t instanceof Api.auth.SentCodeTypeFlashCall || t instanceof Api.auth.SentCodeTypeMissedCall)
+    return "звонком, отвечать не нужно: код в последних цифрах номера, с которого позвонят";
+  if (t instanceof Api.auth.SentCodeTypeFragmentSms) return `через Fragment: ${t.url}`;
+  return t.className;
+}
+
+function describeNextType(t: Api.auth.TypeCodeType | undefined): string | null {
+  if (!t) return null;
+  if (t instanceof Api.auth.CodeTypeSms) return "по SMS";
+  if (t instanceof Api.auth.CodeTypeCall) return "звонком";
+  if (t instanceof Api.auth.CodeTypeFlashCall || t instanceof Api.auth.CodeTypeMissedCall) return "пропущенным звонком";
+  if (t instanceof Api.auth.CodeTypeFragmentSms) return "через Fragment";
+  return null;
+}
+
+async function savePendingCode(client: TelegramClient, phone: string, sent: Api.auth.TypeSentCode) {
+  if (!(sent instanceof Api.auth.SentCode)) throw new Error("Telegram не прислал код, попробуйте ещё раз");
+  if (sent.type instanceof Api.auth.SentCodeTypeSetUpEmailRequired) {
+    throw new Error("Telegram требует сначала привязать к этому аккаунту почту для входа. Сделайте это в приложении Telegram: Настройки → Конфиденциальность → Почта для входа");
+  }
+  const via = describeSentCode(sent.type);
+  const next = describeNextType(sent.nextType);
+  await writeRow({
+    pending: encrypt(JSON.stringify({ session: saveSession(client), phone, phoneCodeHash: sent.phoneCodeHash, step: "code", via, next })),
+  });
+  return { via, next };
+}
+
+// Шаг 1: Telegram присылает код (в приложение, на почту, по SMS или звонком)
 export async function startLogin(phoneRaw: string) {
   const phone = phoneRaw.replace(/[^\d+]/g, "");
+  const { apiId, apiHash } = creds();
   const client = newClient();
   await client.connect();
   try {
-    const { phoneCodeHash, isCodeViaApp } = await client.sendCode(creds(), phone);
-    await writeRow({
-      pending: encrypt(JSON.stringify({ session: saveSession(client), phone, phoneCodeHash, step: "code" })),
-    });
-    return { viaApp: isCodeViaApp };
+    const send = () => client.invoke(new Api.auth.SendCode({ phoneNumber: phone, apiId, apiHash, settings: new Api.CodeSettings({}) }));
+    const sent = await send().catch((e: any) => (e?.errorMessage === "AUTH_RESTART" ? send() : Promise.reject(e)));
+    return await savePendingCode(client, phone, sent);
   } catch (e) {
     throw friendly(e);
   } finally {
     await client.destroy();
+  }
+}
+
+// Код не пришёл: Telegram отправляет его следующим способом (обычно SMS или звонок)
+export async function resendLoginCode() {
+  const row = await readRow();
+  if (!row?.pending) throw new Error("Сначала запросите код");
+  const p = JSON.parse(decrypt(row.pending));
+  if (p.step !== "code") throw new Error("Код уже введён");
+  const client = newClient(p.session);
+  await client.connect();
+  try {
+    const sent = await client.invoke(new Api.auth.ResendCode({ phoneNumber: p.phone, phoneCodeHash: p.phoneCodeHash }));
+    return await savePendingCode(client, p.phone, sent);
+  } catch (e) {
+    throw friendly(e);
+  } finally {
+    await client.destroy();
+  }
+}
+
+// Вход по QR-коду, когда код не доходит. Сайт показывает ссылку tg://login как QR, владелец аккаунта
+// сканирует её в приложении (Настройки → Устройства → Подключить устройство). Сервер не держит соединение,
+// поэтому страница раз в несколько секунд спрашивает checkQrLogin: Telegram отвечает новым токеном,
+// пока QR не отсканирован, и успехом после.
+// При обрыве связи GramJS переподключается минутами, а страница ждёт ответа. Ограничиваем ожидание.
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Telegram не ответил вовремя. Проверьте интернет и нажмите «Начать заново»")), ms);
+  });
+  return Promise.race([p, limit]).finally(() => clearTimeout(timer));
+}
+
+function qrUrl(token: Buffer) {
+  return `tg://login?token=${token.toString("base64url")}`;
+}
+
+async function exportQr(client: TelegramClient) {
+  const { apiId, apiHash } = creds();
+  let res = await client.invoke(new Api.auth.ExportLoginToken({ apiId, apiHash, exceptIds: [] }));
+  if (res instanceof Api.auth.LoginTokenMigrateTo) {
+    await (client as any)._switchDC(res.dcId);
+    res = await client.invoke(new Api.auth.ImportLoginToken({ token: res.token }));
+  }
+  return res;
+}
+
+async function finishAuthorized(client: TelegramClient) {
+  const me = (await client.getMe()) as Api.User;
+  const userName = [me.firstName, me.lastName].filter(Boolean).join(" ") + (me.username ? ` (@${me.username})` : "");
+  await writeRow({ data: encrypt(saveSession(client)), pending: null, phone: me.phone ? maskPhone(`+${me.phone}`) : null, user_name: userName });
+  return { ok: true as const, userName };
+}
+
+export async function startQrLogin() {
+  const client = newClient();
+  try {
+    await withTimeout(client.connect(), 20000);
+    const res = await withTimeout(exportQr(client), 25000);
+    if (!(res instanceof Api.auth.LoginToken)) throw new Error("Telegram не выдал QR-код, попробуйте ещё раз");
+    const url = qrUrl(res.token);
+    await writeRow({ pending: encrypt(JSON.stringify({ session: saveSession(client), step: "qr", url })) });
+    return { url };
+  } catch (e) {
+    throw friendly(e);
+  } finally {
+    await withTimeout(client.destroy(), 5000).catch(() => null);
+  }
+}
+
+export async function checkQrLogin(): Promise<{ url: string } | { ok: true; userName: string } | { needPassword: true }> {
+  const row = await readRow();
+  if (!row?.pending) throw new Error("Сначала нажмите «Войти по QR-коду»");
+  const p = JSON.parse(decrypt(row.pending));
+  if (p.step !== "qr") throw new Error("Вход по QR уже завершён");
+  const client = newClient(p.session);
+  try {
+    await withTimeout(client.connect(), 20000);
+    let res;
+    try {
+      res = await withTimeout(exportQr(client), 25000);
+    } catch (e: any) {
+      if (e?.errorMessage === "SESSION_PASSWORD_NEEDED") {
+        await writeRow({ pending: encrypt(JSON.stringify({ session: saveSession(client), step: "password" })) });
+        return { needPassword: true };
+      }
+      throw e;
+    }
+    if (res instanceof Api.auth.LoginTokenSuccess) return await finishAuthorized(client);
+    if (res instanceof Api.auth.LoginToken) {
+      const url = qrUrl(res.token);
+      if (url !== p.url) await writeRow({ pending: encrypt(JSON.stringify({ ...p, session: saveSession(client), url })) });
+      return { url };
+    }
+    throw new Error("Telegram ответил неожиданно, начните заново");
+  } catch (e) {
+    throw friendly(e);
+  } finally {
+    await withTimeout(client.destroy(), 5000).catch(() => null);
   }
 }
 
@@ -185,10 +323,7 @@ export async function finishLogin(input: { code?: string; password?: string }) {
       const pwd = await client.invoke(new Api.account.GetPassword());
       await client.invoke(new Api.auth.CheckPassword({ password: await computeCheck(pwd, String(input.password || "")) }));
     }
-    const me = (await client.getMe()) as Api.User;
-    const userName = [me.firstName, me.lastName].filter(Boolean).join(" ") + (me.username ? ` (@${me.username})` : "");
-    await writeRow({ data: encrypt(saveSession(client)), pending: null, phone: maskPhone(p.phone), user_name: userName });
-    return { ok: true as const, userName };
+    return await finishAuthorized(client);
   } catch (e) {
     throw friendly(e);
   } finally {

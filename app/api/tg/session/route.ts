@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { finishLogin, logout, sessionStatus, startLogin } from "@/lib/telegram";
+import { checkQrLogin, finishLogin, logout, resendLoginCode, sessionStatus, startLogin, startQrLogin } from "@/lib/telegram";
 import { fail } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +16,9 @@ export async function GET() {
 
 // POST /api/tg/session
 // { action: "start", phone }     — Telegram присылает код
+// { action: "resend" }           — код не пришёл: отправить другим способом
+// { action: "qr-start" }         — вход по QR-коду вместо кода
+// { action: "qr-check" }         — отсканирован ли QR (страница спрашивает раз в несколько секунд)
 // { action: "code", code }       — ввод кода
 // { action: "password", password } — облачный пароль, если включён
 // { action: "logout" }           — выйти из аккаунта
@@ -23,6 +26,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     if (body.action === "start") return NextResponse.json(await startLogin(String(body.phone || "")));
+    if (body.action === "resend") return NextResponse.json(await resendLoginCode());
+    if (body.action === "qr-start") return NextResponse.json(await startQrLogin());
+    if (body.action === "qr-check") return NextResponse.json(await checkQrLogin());
     if (body.action === "code") return NextResponse.json(await finishLogin({ code: body.code }));
     if (body.action === "password") return NextResponse.json(await finishLogin({ password: body.password }));
     if (body.action === "logout") {
